@@ -74,7 +74,8 @@ http://localhost:3001 · Prometheus http://localhost:9090. Host hot reload: `pnp
 | E5 | Grafana dashboard API | PASS after `docker compose restart grafana` (file change not picked up on Windows bind mount) — 3 chat panels provisioned |
 | F1 | Secret scan: `.env` Centrifugo keys + DB passwords vs files in running `chatwidget` and `chatdashboardapp` containers; verify script scan of `dist`, `.next/static` and all committable files | PASS — 0 hits |
 | F2 | `pnpm verify` (final) | **PASS 31/31, exit 0** |
-| F3 | `gh run view 40189491223` (CI on `4d0bf2a`) | FAIL (pre-existing): `./mvnw: Permission denied` → fixed via `git update-index --chmod=+x`; **not yet re-run on GitHub** (changes uncommitted) |
+| F3 | `gh run view 40189491223` (CI on `4d0bf2a`) | FAIL (pre-existing): `./mvnw: Permission denied` → fixed via `git update-index --chmod=+x` |
+| F4 | GitHub CI run `40191724736` on `00cbb6d` (MVP commit) | **PASS** — Frontend, Contracts + Compose, Backend (JDK 25, Testcontainers), E2E on the full container stack: all success |
 
 ## 5. Acceptance checklist
 
@@ -101,8 +102,8 @@ http://localhost:3001 · Prometheus http://localhost:9090. Host hot reload: `pnp
 ## 6. Pre-existing vs new failures
 
 - **Pre-existing:** GitHub CI on `4d0bf2a` failed in the Backend job (`./mvnw: Permission denied`, exit 126) because the
-  wrapper was committed from Windows without the executable bit; E2E job was skipped. Fixed in the index; needs a
-  commit + push to confirm on GitHub.
+  wrapper was committed from Windows without the executable bit; E2E job was skipped. Fixed in `00cbb6d`; CI run
+  `40191724736` passed all four jobs.
 - **New during this work (all fixed):** outdated schema-version assertion; 3 lint errors in a test mock; SDK
   `unsubscribed` vs `error` semantics; Prometheus double-scrape in Mode B; Grafana not reloading the dashboard file.
 

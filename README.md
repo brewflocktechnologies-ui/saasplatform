@@ -10,6 +10,19 @@ Flyway migration runner, Centrifugo, and a local OpenTelemetry/Prometheus/Grafan
 > ⚠️ **LOCAL POC — NOT REAL AUTHENTICATION.** The demo identities are hardcoded and chosen by the client. Nothing here
 > is approved for UAT or production. New features arrive through specs in [`specs/features/`](specs/features/README.md).
 
+## One-command start/stop (bash: Git Bash, WSL, macOS, Linux)
+
+```bash
+./startlocalsetup.sh            # full container stack (infra + Flyway + backend + dashboard + widget), waits for health
+./startlocalsetup.sh --infra    # infrastructure only; then pnpm dev:backend / dev:dashboard / dev:widget
+./stoplocalsetup.sh             # remove containers, keep all data volumes
+./stoplocalsetup.sh --pause     # just stop containers
+```
+
+`startlocalsetup.sh` creates `.env` with random local secrets if missing (or appends newly required keys; existing
+values are never changed). Neither script deletes volumes. JS dependencies for host mode/tests still come from
+`pnpm install`.
+
 ## Quick start (Windows PowerShell)
 
 Prerequisites: Docker Desktop, Node.js 24 LTS with Corepack, JDK 25 (`JAVA_HOME`). Details:
