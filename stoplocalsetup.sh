@@ -20,8 +20,8 @@ case "${1:-}" in
     echo ">>> docker compose ${files[*]} stop"
     docker compose "${files[@]}" stop
     ;;
-  -h|--help) sed -n '2,9p' "$0"; exit 0 ;;
+  -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
   *) echo "Unknown option: $1 (use --pause or --help)" >&2; exit 2 ;;
 esac
 
-echo "Stopped. Data volumes are kept. Start again with: ./startlocalsetup.sh"
+echo "Stopped. Data volumes are kept. Start again with: ./startlocalsetup.sh   (Windows cmd/PowerShell: startlocalsetup.bat)"

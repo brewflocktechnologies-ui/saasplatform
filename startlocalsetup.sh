@@ -13,7 +13,7 @@ mode=containers
 case "${1:-}" in
   "") ;;
   --infra) mode=infra ;;
-  -h|--help) sed -n '2,9p' "$0"; exit 0 ;;
+  -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
   *) echo "Unknown option: $1 (use --infra or --help)" >&2; exit 2 ;;
 esac
 
@@ -71,4 +71,4 @@ else
   Backend      http://localhost:8080/actuator/health
 EOF
 fi
-echo "Stop with: ./stoplocalsetup.sh"
+echo "Stop with: ./stoplocalsetup.sh   (Windows cmd/PowerShell: stoplocalsetup.bat)"

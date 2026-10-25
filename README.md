@@ -10,7 +10,7 @@ Flyway migration runner, Centrifugo, and a local OpenTelemetry/Prometheus/Grafan
 > ⚠️ **LOCAL POC — NOT REAL AUTHENTICATION.** The demo identities are hardcoded and chosen by the client. Nothing here
 > is approved for UAT or production. New features arrive through specs in [`specs/features/`](specs/features/README.md).
 
-## One-command start/stop (bash: Git Bash, WSL, macOS, Linux)
+## One-command start/stop
 
 ```bash
 ./startlocalsetup.sh            # full container stack (infra + Flyway + backend + dashboard + widget), waits for health
@@ -18,6 +18,11 @@ Flyway migration runner, Centrifugo, and a local OpenTelemetry/Prometheus/Grafan
 ./stoplocalsetup.sh             # remove containers, keep all data volumes
 ./stoplocalsetup.sh --pause     # just stop containers
 ```
+
+Windows cmd / PowerShell / Explorer: use `startlocalsetup.bat` and `stoplocalsetup.bat` with the same options (e.g.
+`startlocalsetup.bat --infra`). They run the `.sh` scripts with Git for Windows' `bash.exe` (Git for Windows is
+required; plain `bash` is avoided because it usually resolves to WSL). The `.sh` scripts also run directly in Git Bash,
+WSL, macOS and Linux.
 
 `startlocalsetup.sh` creates `.env` with random local secrets if missing (or appends newly required keys; existing
 values are never changed). Neither script deletes volumes. JS dependencies for host mode/tests still come from

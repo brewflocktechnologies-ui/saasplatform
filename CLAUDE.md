@@ -37,6 +37,8 @@ Local stack:
 ```bash
 ./startlocalsetup.sh            # full container stack (Mode B), waits for health; ./startlocalsetup.sh --infra = infra only
 ./stoplocalsetup.sh             # compose down, volumes kept (--pause = stop only)
+# Windows cmd/PowerShell: startlocalsetup.bat / stoplocalsetup.bat (same options; thin wrappers that run the .sh
+# with Git for Windows' bash.exe; keep all logic in the .sh files)
 pnpm dev:backend | pnpm dev:dashboard | pnpm dev:widget  # Mode A hot reload, after infra is up
 pnpm db:info | pnpm db:validate | pnpm db:migrate        # Flyway runner via `docker compose run`
 ```
