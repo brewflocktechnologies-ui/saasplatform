@@ -1,0 +1,4 @@
+/* Public CSS entry point: import '@chat-platform/designsystem/tokens.css' once per application. */
+@import './primitives.css';
+@import './semantic.css';
+@import './themes/dark.css';

@@ -1,0 +1,87 @@
+/* App-level layout only; colours/spacing come from semantic design tokens. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  font-family: var(--cp-font-family);
+  font-size: var(--cp-text-md);
+  line-height: var(--cp-line-height-normal);
+  background: var(--cp-color-background);
+  color: var(--cp-color-text);
+}
+a {
+  color: var(--cp-color-primary);
+}
+a:focus-visible {
+  outline: none;
+  box-shadow: var(--cp-focus-ring);
+  border-radius: var(--cp-radius-control);
+}
+code {
+  font-family: var(--cp-font-family-code);
+}
+.page {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: var(--cp-spacing-lg) var(--cp-spacing-md);
+  display: grid;
+  gap: var(--cp-spacing-lg);
+}
+.page-header h1 {
+  margin: 0 0 var(--cp-spacing-xs);
+  font-size: var(--cp-text-xl);
+}
+.muted {
+  color: var(--cp-color-text-muted);
+}
+.env {
+  display: inline-block;
+  padding: 0 var(--cp-spacing-sm);
+  border: var(--cp-border);
+  border-radius: var(--cp-radius-badge);
+  font-family: var(--cp-font-family-code);
+  font-size: var(--cp-text-sm);
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--cp-spacing-md);
+}
+.card {
+  background: var(--cp-color-surface);
+  border: var(--cp-border);
+  border-radius: var(--cp-radius-card);
+  padding: var(--cp-spacing-md);
+}
+.card h2 {
+  margin-top: 0;
+  font-size: var(--cp-text-lg);
+}
+.status-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 var(--cp-spacing-md);
+  display: grid;
+  gap: var(--cp-spacing-sm);
+}
+.error {
+  color: var(--cp-color-danger);
+  font-size: var(--cp-text-sm);
+}
+dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--cp-spacing-xs) var(--cp-spacing-md);
+  margin: 0;
+  font-size: var(--cp-text-sm);
+}
+dt {
+  color: var(--cp-color-text-muted);
+}
+dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

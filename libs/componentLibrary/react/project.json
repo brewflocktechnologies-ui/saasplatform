@@ -1,0 +1,9 @@
+{
+  "name": "component-library-react",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/componentLibrary/react/src",
+  "projectType": "library",
+  "tags": ["type:ui", "platform:react"],
+  "// targets": "to see all targets run: nx show project component-library-react --web",
+  "targets": {}
+}

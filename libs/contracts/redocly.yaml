@@ -1,0 +1,10 @@
+# Redocly CLI lint configuration for the platform contracts.
+extends:
+  - recommended
+rules:
+  # Local-only POC: auth is introduced with the first feature spec that needs it.
+  security-defined: off
+  # The only server entry is intentionally the local backend.
+  no-server-example.com: off
+  # Parameterless status endpoint has no client-error cases; errors are covered by the default Problem response.
+  operation-4xx-response: off

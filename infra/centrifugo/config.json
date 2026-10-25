@@ -1,0 +1,17 @@
+{
+  "log": {
+    "level": "info"
+  },
+  "http_server": {
+    "port": "8000"
+  },
+  "client": {
+    "allowed_origins": ["http://localhost:3000", "http://localhost:5173"]
+  },
+  "admin": {
+    "enabled": false
+  },
+  "health": {
+    "enabled": true
+  }
+}

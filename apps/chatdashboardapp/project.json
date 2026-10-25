@@ -1,0 +1,25 @@
+{
+  "name": "chatdashboardapp",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/chatdashboardapp/src",
+  "projectType": "application",
+  "tags": [
+    "type:app",
+    "scope:dashboard",
+    "platform:react"
+  ],
+  "// targets": "to see all targets run: nx show project chatdashboardapp --web",
+  "targets": {
+    "typecheck": {
+      "command": "tsc --noEmit -p tsconfig.json",
+      "options": {
+        "cwd": "apps/chatdashboardapp"
+      },
+      "cache": true,
+      "inputs": [
+        "default",
+        "^default"
+      ]
+    }
+  }
+}

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Chat Widget — Local POC Demo</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Chat Widget — Local POC Demo</h1>
+        <p class="muted">
+          This page renders the framework-independent <code>&lt;chat-platform-widget&gt;</code> Lit custom element.
+          It is a local scaffold proof: messages are kept in memory and are <strong>not</strong> sent to a server.
+          It is not production-ready chat.
+        </p>
+      </header>
+      <div class="cols">
+        <section aria-labelledby="widget-heading">
+          <h2 id="widget-heading">Widget</h2>
+          <chat-platform-widget></chat-platform-widget>
+        </section>
+        <section aria-labelledby="lib-heading">
+          <h2 id="lib-heading">Web component library</h2>
+          <p class="muted">
+            <code>&lt;cp-status-badge&gt;</code> from <code>libs/componentLibrary/web</code>, rendered without React:
+          </p>
+          <cp-status-badge label="Widget bundle" status="up" data-testid="standalone-badge"></cp-status-badge>
+          <p class="muted">
+            Embed entry point (v1): <code>embed/chat-platform-widget.v1.js</code>. See
+            <code>apps/chatwidget/README.md</code>.
+          </p>
+        </section>
+      </div>
+    </main>
+  </body>
+</html>

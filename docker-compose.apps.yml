@@ -1,0 +1,58 @@
+# Mode B - full container POC. Use together with the base file:
+#   docker compose -f docker-compose.yml -f docker-compose.apps.yml up --build -d --wait
+# Startup order: postgres healthy -> flyway-migration completed -> backend healthy -> frontends.
+# Uses the same host ports as Mode A, so stop host dev servers first.
+services:
+  modulithplatformservice:
+    build: ./services/modulithplatformservice
+    image: chat-platform/modulithplatformservice:local
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:-local}
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-chatplatform}?currentSchema=platform
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-platform_app}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?run scripts/dev-setup.ps1 to create .env}
+      APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173}
+      CENTRIFUGO_HEALTH_URL: http://centrifugo:8000/health
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    ports:
+      - '127.0.0.1:${BACKEND_HOST_PORT:-8080}:8080'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      flyway-migration:
+        condition: service_completed_successfully
+      centrifugo:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    restart: unless-stopped
+
+  chatdashboardapp:
+    build:
+      context: .
+      dockerfile: apps/chatdashboardapp/Dockerfile
+    image: chat-platform/chatdashboardapp:local
+    environment:
+      # Read at request time by the server component; must be host-browser reachable URLs.
+      PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:8080}
+      PUBLIC_WIDGET_DEMO_URL: ${PUBLIC_WIDGET_DEMO_URL:-http://localhost:5173}
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:-local}
+    ports:
+      - '127.0.0.1:${DASHBOARD_HOST_PORT:-3000}:3000'
+    depends_on:
+      modulithplatformservice:
+        condition: service_healthy
+    restart: unless-stopped
+
+  chatwidget:
+    build:
+      context: .
+      dockerfile: apps/chatwidget/Dockerfile
+    image: chat-platform/chatwidget:local
+    ports:
+      - '127.0.0.1:${WIDGET_HOST_PORT:-5173}:8080'
+    depends_on:
+      modulithplatformservice:
+        condition: service_healthy
+    restart: unless-stopped

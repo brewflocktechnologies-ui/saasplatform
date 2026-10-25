@@ -1,0 +1,54 @@
+/*
+ * Primitive tokens: raw values. Components must NOT use these directly; use semantic tokens (semantic.css).
+ * Naming: --cp-<category>-<name>-<step>. Adding tokens is backwards compatible; renaming/removing is breaking.
+ */
+:root {
+  /* Palette */
+  --cp-color-neutral-0: #ffffff;
+  --cp-color-neutral-50: #f7f8fa;
+  --cp-color-neutral-100: #eef0f4;
+  --cp-color-neutral-200: #dde1e8;
+  --cp-color-neutral-400: #9aa3b2;
+  --cp-color-neutral-600: #5b6474;
+  --cp-color-neutral-700: #434b59;
+  --cp-color-neutral-800: #2a303b;
+  --cp-color-neutral-900: #171b22;
+  --cp-color-neutral-950: #0e1116;
+
+  --cp-color-blue-300: #8db4ff;
+  --cp-color-blue-500: #2f6fed;
+  --cp-color-blue-600: #1f58cc;
+  --cp-color-green-300: #7dd8a4;
+  --cp-color-green-600: #18794e;
+  --cp-color-amber-300: #f5c96b;
+  --cp-color-amber-700: #8a5a00;
+  --cp-color-red-300: #ff9d9d;
+  --cp-color-red-600: #c62828;
+
+  /* Spacing scale (4px base) */
+  --cp-space-1: 0.25rem;
+  --cp-space-2: 0.5rem;
+  --cp-space-3: 0.75rem;
+  --cp-space-4: 1rem;
+  --cp-space-6: 1.5rem;
+  --cp-space-8: 2rem;
+
+  /* Typography scale. System font stacks only: no third-party font CDN is required to render. */
+  --cp-font-family-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --cp-font-family-mono: ui-monospace, 'Cascadia Code', 'SFMono-Regular', Menlo, Consolas, monospace;
+  --cp-font-size-100: 0.75rem;
+  --cp-font-size-200: 0.875rem;
+  --cp-font-size-300: 1rem;
+  --cp-font-size-500: 1.25rem;
+  --cp-font-size-700: 1.75rem;
+  --cp-font-weight-regular: 400;
+  --cp-font-weight-semibold: 600;
+  --cp-line-height-normal: 1.5;
+
+  /* Shape */
+  --cp-radius-sm: 4px;
+  --cp-radius-md: 8px;
+  --cp-radius-pill: 999px;
+  --cp-border-width-1: 1px;
+  --cp-focus-width: 3px;
+}

@@ -1,0 +1,20 @@
+{
+  "name": "platform-tests",
+  "$schema": "../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "sourceRoot": "tests",
+  "tags": ["type:e2e"],
+  "implicitDependencies": ["chatdashboardapp", "chatwidget", "modulithplatformservice", "contracts"],
+  "targets": {
+    "e2e": {
+      "// note": "Explicit (not plugin-inferred) so Playwright's webServer.reuseExistingServer decides whether to start the frontends; Nx-inferred continuous deps would fail when dev servers or containers already own the ports.",
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "playwright test -c tests/playwright.config.ts",
+        "cwd": "{workspaceRoot}"
+      },
+      "dependsOn": [],
+      "cache": false
+    }
+  }
+}

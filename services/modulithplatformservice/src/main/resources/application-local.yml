@@ -1,0 +1,7 @@
+# Local/test only: expose the Prometheus scrape endpoint without authentication.
+# UAT/production must protect actuator endpoints (separate management port + network policy or auth).
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus

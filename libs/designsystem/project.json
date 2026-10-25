@@ -1,0 +1,9 @@
+{
+  "name": "designsystem",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/designsystem/src",
+  "projectType": "library",
+  "tags": ["type:tokens", "platform:shared"],
+  "// targets": "to see all targets run: nx show project designsystem --web",
+  "targets": {}
+}

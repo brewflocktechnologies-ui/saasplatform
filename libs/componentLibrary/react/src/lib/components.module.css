@@ -1,0 +1,58 @@
+/* Consumes semantic design tokens only (libs/designsystem/tokens). */
+.button {
+  font: inherit;
+  font-weight: var(--cp-font-weight-semibold);
+  padding: var(--cp-spacing-sm) var(--cp-spacing-md);
+  border-radius: var(--cp-radius-control);
+  border: var(--cp-border-width-1) solid var(--cp-color-primary);
+  cursor: pointer;
+}
+.primary {
+  background: var(--cp-color-primary);
+  color: var(--cp-color-on-primary);
+}
+.primary:hover:not(:disabled) {
+  background: var(--cp-color-primary-hover);
+}
+.secondary {
+  background: var(--cp-color-surface);
+  color: var(--cp-color-primary);
+}
+.button:focus-visible {
+  outline: none;
+  box-shadow: var(--cp-focus-ring);
+}
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cp-spacing-xs);
+  padding: var(--cp-spacing-xs) var(--cp-spacing-sm);
+  border-radius: var(--cp-radius-badge);
+  border: var(--cp-border);
+  font-size: var(--cp-text-sm);
+  color: var(--cp-color-text);
+  background: var(--cp-color-surface);
+}
+.dot {
+  width: 0.6em;
+  height: 0.6em;
+  border-radius: 50%;
+  background: currentColor;
+}
+.loading .dot {
+  color: var(--cp-color-text-muted);
+}
+.up .dot {
+  color: var(--cp-color-success);
+}
+.degraded .dot {
+  color: var(--cp-color-warning);
+}
+.down .dot {
+  color: var(--cp-color-danger);
+}

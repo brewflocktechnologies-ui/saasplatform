@@ -1,0 +1,39 @@
+{
+  "compileOnSave": false,
+  "compilerOptions": {
+    "rootDir": ".",
+    "sourceMap": true,
+    "declaration": false,
+    "moduleResolution": "bundler",
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "importHelpers": true,
+    "target": "es2015",
+    "module": "esnext",
+    "lib": [
+      "es2020",
+      "dom"
+    ],
+    "skipLibCheck": true,
+    "skipDefaultLibCheck": true,
+    "strict": false,
+    "paths": {
+      "@chat-platform/component-library-react": [
+        "./libs/componentLibrary/react/src/index.ts"
+      ],
+      "@chat-platform/component-library-web": [
+        "./libs/componentLibrary/web/src/index.ts"
+      ],
+      "@chat-platform/designsystem": [
+        "./libs/designsystem/src/index.ts"
+      ],
+      "@chat-platform/designsystem/tokens.css": [
+        "./libs/designsystem/tokens/index.css"
+      ]
+    }
+  },
+  "exclude": [
+    "node_modules",
+    "tmp"
+  ]
+}

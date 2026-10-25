@@ -1,0 +1,24 @@
+{
+  "name": "flyway-migration",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "tags": ["type:migration", "platform:db"],
+  "targets": {
+    "info": {
+      "command": "docker compose run --rm --build flyway-migration info",
+      "options": { "cwd": "{workspaceRoot}" }
+    },
+    "validate": {
+      "command": "docker compose run --rm --build flyway-migration validate",
+      "options": { "cwd": "{workspaceRoot}" }
+    },
+    "migrate": {
+      "command": "docker compose run --rm --build flyway-migration migrate",
+      "options": { "cwd": "{workspaceRoot}" }
+    },
+    "docker-build": {
+      "command": "docker build -t chat-platform/flyway-migration:local database/flywayMigration",
+      "options": { "cwd": "{workspaceRoot}" }
+    }
+  }
+}

@@ -1,0 +1,137 @@
+openapi: 3.1.0
+info:
+  title: Chat Platform API
+  version: 0.1.0
+  description: |
+    Public HTTP contract of `modulithplatformservice`. Contract-first: change this file in the same PR as the
+    implementation; `pnpm contracts:validate` lints it and `tests/contract` checks live responses against it.
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+servers:
+  - url: http://localhost:8080
+    description: Local development
+security: []
+tags:
+  - name: platform
+    description: Platform status and setup proof
+paths:
+  /api/v1/status:
+    get:
+      operationId: getStatus
+      summary: Application status and safe dependency status
+      description: Never exposes secrets, connection strings or stack traces.
+      tags: [platform]
+      responses:
+        '200':
+          description: Status report. `status` is DEGRADED when any dependency is DOWN.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+              examples:
+                healthy:
+                  value:
+                    application: modulithplatformservice
+                    version: 0.1.0
+                    environment: local
+                    status: UP
+                    timestamp: '2026-10-25T10:00:00Z'
+                    dependencies:
+                      database: { status: UP, detail: schema version 1 }
+                      centrifugo: { status: UP, detail: health endpoint OK }
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/v1/bootstrap:
+    get:
+      operationId: getBootstrap
+      summary: Latest setup record created by the Flyway bootstrap migration
+      tags: [platform]
+      responses:
+        '200':
+          description: Bootstrap record read from PostgreSQL.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BootstrapRecord'
+              examples:
+                local:
+                  value:
+                    id: 1
+                    setupKey: local-poc
+                    message: Flyway migration V1 applied; backend can read PostgreSQL.
+                    createdAt: '2026-10-25T10:00:00Z'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+components:
+  responses:
+    Problem:
+      description: Error in RFC 9457 problem-details format.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            unavailable:
+              value:
+                type: about:blank
+                title: Service Unavailable
+                status: 503
+                detail: The database is unavailable.
+                instance: /api/v1/bootstrap
+  schemas:
+    DependencyStatus:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [UP, DOWN]
+        detail:
+          type: [string, 'null']
+          description: Short, safe human-readable detail.
+    StatusResponse:
+      type: object
+      required: [application, version, environment, status, timestamp, dependencies]
+      properties:
+        application: { type: string }
+        version: { type: string }
+        environment: { type: string }
+        status:
+          type: string
+          enum: [UP, DEGRADED]
+        timestamp:
+          type: string
+          format: date-time
+        dependencies:
+          type: object
+          required: [database, centrifugo]
+          properties:
+            database: { $ref: '#/components/schemas/DependencyStatus' }
+            centrifugo: { $ref: '#/components/schemas/DependencyStatus' }
+          additionalProperties:
+            $ref: '#/components/schemas/DependencyStatus'
+    BootstrapRecord:
+      type: object
+      required: [id, setupKey, message, createdAt]
+      additionalProperties: false
+      properties:
+        id: { type: integer, format: int64 }
+        setupKey: { type: string }
+        message: { type: string }
+        createdAt:
+          type: string
+          format: date-time
+    Problem:
+      type: object
+      required: [title, status]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }

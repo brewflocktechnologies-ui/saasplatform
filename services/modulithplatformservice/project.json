@@ -1,0 +1,36 @@
+{
+  "name": "modulithplatformservice",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "sourceRoot": "services/modulithplatformservice/src/main/java",
+  "tags": ["type:service", "platform:jvm"],
+  "implicitDependencies": ["flyway-migration"],
+  "targets": {
+    "build": {
+      "command": "node ../../tools/mvnw.mjs package -DskipTests",
+      "options": { "cwd": "services/modulithplatformservice" },
+      "inputs": ["{projectRoot}/pom.xml", "{projectRoot}/src/main/**/*"],
+      "outputs": ["{projectRoot}/target"],
+      "cache": true
+    },
+    "test": {
+      "command": "node ../../tools/mvnw.mjs test",
+      "options": { "cwd": "services/modulithplatformservice" },
+      "inputs": [
+        "{projectRoot}/pom.xml",
+        "{projectRoot}/src/**/*",
+        "{workspaceRoot}/database/flywayMigration/sql/**/*"
+      ],
+      "cache": true
+    },
+    "dev": {
+      "command": "node ../../tools/mvnw.mjs spring-boot:run -Dspring-boot.run.profiles=local",
+      "options": { "cwd": "services/modulithplatformservice" },
+      "continuous": true
+    },
+    "docker-build": {
+      "command": "docker build -t chat-platform/modulithplatformservice:local services/modulithplatformservice",
+      "options": { "cwd": "{workspaceRoot}" }
+    }
+  }
+}

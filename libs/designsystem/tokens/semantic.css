@@ -1,0 +1,38 @@
+/*
+ * Semantic tokens (light theme, default). Components consume ONLY these.
+ * Each value references a primitive token; libs/designsystem/src/tokens.spec.ts enforces this.
+ */
+:root,
+[data-theme='light'] {
+  --cp-color-background: var(--cp-color-neutral-50);
+  --cp-color-surface: var(--cp-color-neutral-0);
+  --cp-color-text: var(--cp-color-neutral-900);
+  --cp-color-text-muted: var(--cp-color-neutral-600);
+  --cp-color-border: var(--cp-color-neutral-200);
+  --cp-color-primary: var(--cp-color-blue-500);
+  --cp-color-primary-hover: var(--cp-color-blue-600);
+  --cp-color-on-primary: var(--cp-color-neutral-0);
+  --cp-color-success: var(--cp-color-green-600);
+  --cp-color-warning: var(--cp-color-amber-700);
+  --cp-color-danger: var(--cp-color-red-600);
+  --cp-color-focus-ring: var(--cp-color-blue-500);
+
+  --cp-font-family: var(--cp-font-family-sans);
+  --cp-font-family-code: var(--cp-font-family-mono);
+  --cp-text-sm: var(--cp-font-size-200);
+  --cp-text-md: var(--cp-font-size-300);
+  --cp-text-lg: var(--cp-font-size-500);
+  --cp-text-xl: var(--cp-font-size-700);
+
+  --cp-spacing-xs: var(--cp-space-1);
+  --cp-spacing-sm: var(--cp-space-2);
+  --cp-spacing-md: var(--cp-space-4);
+  --cp-spacing-lg: var(--cp-space-6);
+  --cp-spacing-xl: var(--cp-space-8);
+
+  --cp-radius-control: var(--cp-radius-sm);
+  --cp-radius-card: var(--cp-radius-md);
+  --cp-radius-badge: var(--cp-radius-pill);
+  --cp-border: var(--cp-border-width-1) solid var(--cp-color-border);
+  --cp-focus-ring: 0 0 0 var(--cp-focus-width) var(--cp-color-focus-ring);
+}
