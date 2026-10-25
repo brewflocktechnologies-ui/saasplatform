@@ -3,12 +3,20 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "projectType": "library",
   "sourceRoot": "libs/contracts",
-  "tags": ["type:contracts", "platform:shared"],
+  "tags": [
+    "type:contracts",
+    "platform:shared"
+  ],
   "targets": {
     "validate": {
-      "command": "redocly lint libs/contracts/openapi/platform-api.yaml --config libs/contracts/redocly.yaml",
-      "options": { "cwd": "{workspaceRoot}" },
-      "inputs": ["{projectRoot}/**/*"],
+      "command": "redocly lint libs/contracts/openapi/platform-api.yaml libs/contracts/asyncapi/chat-realtime.yaml --config libs/contracts/redocly.yaml && node tools/validate-json-schemas.mjs",
+      "options": {
+        "cwd": "{workspaceRoot}"
+      },
+      "inputs": [
+        "{projectRoot}/**/*",
+        "{workspaceRoot}/tools/validate-json-schemas.mjs"
+      ],
       "cache": true
     }
   }

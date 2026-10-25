@@ -31,6 +31,7 @@
 | `component-library-react` | `libs/componentLibrary/react` | `type:ui`, `platform:react` | tokens |
 | `component-library-web` | `libs/componentLibrary/web` | `type:ui`, `platform:web` | tokens |
 | `contracts` | `libs/contracts` | `type:contracts`, `platform:shared` | nothing |
+| `chat-client` | `libs/chat-client` | `type:data-access`, `platform:shared` | nothing (no React/Next/Lit imports) |
 | `modulithplatformservice` | `services/modulithplatformservice` | `type:service`, `platform:jvm` | (Maven) |
 | `flyway-migration` | `database/flywayMigration` | `type:migration`, `platform:db` | — |
 | `platform-tests` | `tests` | `type:e2e` | contracts |
@@ -59,11 +60,19 @@ RFC 9457 `application/problem+json` without stack traces.
 - Roles and schema are bootstrapped by `database/postgres-init/01-roles.sh` on first volume initialisation.
 - Migrations are immutable once applied; add `V<n>__description.sql`.
 
-## Real-time
+## Chat MVP and real-time
 
-Centrifugo runs standalone with local-only secrets from `.env`, admin UI disabled, explicit allowed origins
-(ADR-0004). No channels, tokens or publishing exist yet; the backend only checks `/health`. Channel authorization
-and token issuing must be designed in the first real-time feature spec before UAT/production.
+Implemented by [specs/mvpsetup.spec.md](../specs/mvpsetup.spec.md); guide: [features/local-chat-mvp.md](features/local-chat-mvp.md).
+
+- Backend modules: `chat` (demo actors, conversations, messages, token authorization) depends on `realtime`
+  (Centrifugo token signing + HTTP API publisher). Send path: validate → commit → publish; publish failure after
+  commit is reported (`realtimeDelivery: FAILED`), never rolled back. No outbox yet (at-most-once delivery).
+- Centrifugo (ADR-0004): `chat` namespace, client publish/subscribe disabled; subscriptions require a backend-issued
+  JWT bound to actor + exact channel. Channels `chat:inbox`, `chat:conversation:<uuid>`.
+- Frontends share `libs/chat-client` (Nx `type:data-access`, `platform:shared`): typed API client, `mergeMessages`
+  (dedupe by id), and Centrifuge wiring — no React or Lit runtime inside, so the React/Lit boundary still holds.
+- **LOCAL POC — NOT REAL AUTHENTICATION:** identities are hardcoded (`userone`, `agentbob`). Real authentication,
+  tenancy-scoped channels and an outbox are required before any shared environment.
 
 ## Deployment boundaries
 

@@ -57,7 +57,7 @@ Invoke-Check 'lint' 'pnpm nx run-many -t lint --output-style=static'
 Invoke-Check 'typecheck' 'pnpm nx run-many -t typecheck --output-style=static'
 Invoke-Check 'unit tests (frontend + Maven incl. Testcontainers)' 'pnpm nx run-many -t test --output-style=static'
 Invoke-Check 'production builds (Next.js, Vite, Maven package)' 'pnpm nx run-many -t build --output-style=static'
-Invoke-Check 'OpenAPI contract lint' 'pnpm nx run contracts:validate --output-style=static'
+Invoke-Check 'contracts (OpenAPI + AsyncAPI lint, JSON Schema compile)' 'pnpm nx run contracts:validate --output-style=static'
 Invoke-Check 'docker compose config (base)' 'docker compose config -q'
 Invoke-Check 'docker compose config (base + apps)' 'docker compose -f docker-compose.yml -f docker-compose.apps.yml config -q'
 
@@ -79,6 +79,7 @@ Add-Result 'no local secret values in bundles or committable files' ($leaks.Coun
 # --- Runtime checks (stack must be running: Mode A or Mode B) -------------------------------------
 if (-not $SkipRuntime) {
   Invoke-Check 'Flyway validate' 'pnpm nx run flyway-migration:validate --output-style=static'
+  Invoke-Check 'Flyway info (V2 chat tables applied)' 'pnpm nx run flyway-migration:info --output-style=static | findstr /C:"create chat tables" | findstr Success'
   Test-Http 'backend /actuator/health' 'http://localhost:8080/actuator/health' '"UP"'
   Test-Http 'backend /api/v1/status (all UP)' 'http://localhost:8080/api/v1/status' '"status":"UP","timestamp"'
   Test-Http 'backend /api/v1/bootstrap (Flyway record)' 'http://localhost:8080/api/v1/bootstrap' 'local-poc'
@@ -89,7 +90,10 @@ if (-not $SkipRuntime) {
   Test-Http 'Tempo ready' 'http://localhost:3200/ready' 'ready'
   Test-Http 'OTel Collector health' 'http://localhost:13133/' 'Server available'
   Test-Http 'dashboard page' 'http://localhost:3000/' 'Chat Platform'
-  Test-Http 'widget demo page' 'http://localhost:5173/' 'chat-platform-widget'
+  Test-Http 'widget overview page' 'http://localhost:5173/' 'chat-platform-widget'
+  Test-Http 'widget chat page /demo (userone)' 'http://localhost:5173/demo' 'Demo visitor: userone'
+  Test-Http 'dashboard agent inbox /agent (agentbob)' 'http://localhost:3000/agent' 'Demo agent: agentbob'
+  Test-Http 'chat API: agent inbox lists the userone conversation' 'http://localhost:8080/api/v1/demo/conversations?actorId=agentbob' 'userone'
 
   $q = Get-Http 'http://localhost:9090/api/v1/query?query=max(up%7Bjob%3D%22modulithplatformservice%22%7D)'
   Add-Result 'Prometheus scrapes backend (max up == 1)' ([bool]($q -and $q.Content -match '"value":\[[^,]+,"1"\]'))

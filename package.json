@@ -29,6 +29,7 @@
     "verify": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-local.ps1"
   },
   "dependencies": {
+    "centrifuge": "5.8.0",
     "lit": "3.3.3",
     "next": "~16.4.3",
     "react": "^19.0.0",
@@ -58,6 +59,7 @@
     "@testing-library/dom": "10.4.0",
     "@testing-library/react": "16.3.0",
     "@types/node": "^22.0.0",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.0.0",
@@ -76,6 +78,7 @@
     "jiti": "2.4.2",
     "jsdom": "^27.1.0",
     "nx": "24.0.1",
+    "pg": "8.23.1",
     "prettier": "~3.6.2",
     "swc-loader": "0.1.15",
     "tslib": "^2.3.0",

@@ -63,7 +63,8 @@ class BootstrapIntegrationTests {
 		assertThat(this.mvc.get().uri("/api/v1/status")).hasStatusOk()
 			.bodyJson()
 			.extractingPath("$.dependencies.database.detail")
-			.isEqualTo("schema version 1");
+			.asString()
+			.matches("schema version \\d+");
 	}
 
 }

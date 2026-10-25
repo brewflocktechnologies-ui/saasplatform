@@ -1,0 +1,65 @@
+asyncapi: 3.0.0
+info:
+  title: Chat Platform real-time events (Centrifugo)
+  version: 0.2.0
+  description: |
+    Events published by `modulithplatformservice` through the Centrifugo server HTTP API **after** the database
+    commit. Browsers only subscribe (subscription JWT per exact actor + channel); client publication is disabled.
+    Delivery is at-most-once (publish-after-commit, no outbox): clients reload history from the REST API on
+    (re)subscribe and deduplicate by message id. Payload schemas: `libs/contracts/json-schema/chat/`.
+    LOCAL POC — demo identities `userone` / `agentbob` only.
+defaultContentType: application/json
+servers:
+  local:
+    host: localhost:8000
+    protocol: ws
+    pathname: /connection/websocket
+    description: Centrifugo (local). Connection JWT from GET /api/v1/demo/realtime/connection-token.
+channels:
+  conversation:
+    address: 'chat:conversation:{conversationId}'
+    description: Live events of one conversation. agentbob (assigned agent) and userone (visitor) may subscribe.
+    parameters:
+      conversationId:
+        description: Conversation UUID.
+    messages:
+      messageCreated:
+        $ref: '#/components/messages/messageCreated'
+  inbox:
+    address: 'chat:inbox'
+    description: Agent inbox refresh signals. Only agentbob may subscribe. Clients refetch the inbox from the API.
+    messages:
+      messageCreated:
+        $ref: '#/components/messages/messageCreated'
+      conversationCreated:
+        $ref: '#/components/messages/conversationCreated'
+operations:
+  receiveConversationEvents:
+    action: receive
+    summary: Subscriber receives conversation events.
+    channel:
+      $ref: '#/channels/conversation'
+    messages:
+      - $ref: '#/channels/conversation/messages/messageCreated'
+  receiveInboxEvents:
+    action: receive
+    summary: Agent receives inbox refresh signals.
+    channel:
+      $ref: '#/channels/inbox'
+    messages:
+      - $ref: '#/channels/inbox/messages/messageCreated'
+      - $ref: '#/channels/inbox/messages/conversationCreated'
+components:
+  messages:
+    messageCreated:
+      name: message.created
+      title: Message created
+      summary: A message was persisted.
+      payload:
+        $ref: '../json-schema/chat/message-created.v1.schema.json'
+    conversationCreated:
+      name: conversation.created
+      title: Conversation created
+      summary: The demo conversation was created.
+      payload:
+        $ref: '../json-schema/chat/conversation-created.v1.schema.json'

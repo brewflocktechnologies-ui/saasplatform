@@ -4,8 +4,11 @@ Foundation for a multi-tenant SaaS customer-support / live-chat platform: an Nx 
 an embeddable Lit widget, shared design tokens and component libraries, a Spring Boot modular monolith, a dedicated
 Flyway migration runner, Centrifugo, and a local OpenTelemetry/Prometheus/Grafana/Tempo/Loki stack.
 
-> Status: **local POC / scaffold**. No authentication, tenancy or real chat yet — those arrive through feature specs
-> in [`specs/features/`](specs/features/README.md).
+> Status: **local POC**. Includes the end-to-end [local chat MVP](docs/features/local-chat-mvp.md): visitor `userone`
+> (widget) and agent `agentbob` (dashboard) chat live via the API, PostgreSQL and Centrifugo.
+>
+> ⚠️ **LOCAL POC — NOT REAL AUTHENTICATION.** The demo identities are hardcoded and chosen by the client. Nothing here
+> is approved for UAT or production. New features arrive through specs in [`specs/features/`](specs/features/README.md).
 
 ## Quick start (Windows PowerShell)
 
@@ -41,10 +44,10 @@ pnpm stack:down      # stops and removes containers, KEEPS data volumes
 
 | Service | URL |
 |---|---|
-| Dashboard | http://localhost:3000 |
-| Widget demo | http://localhost:5173 |
-| Backend API | http://localhost:8080/api/v1/status · /api/v1/bootstrap · /actuator/health |
-| Centrifugo | http://localhost:8000/health |
+| Dashboard | http://localhost:3000 · **agent inbox (agentbob): http://localhost:3000/agent** |
+| Widget | http://localhost:5173 · **visitor chat (userone): http://localhost:5173/demo** |
+| Backend API | http://localhost:8080/api/v1/status · /api/v1/bootstrap · /api/v1/demo/* · /actuator/health |
+| Centrifugo | WebSocket `ws://localhost:8000/connection/websocket`, health http://localhost:8000/health |
 | Grafana | http://localhost:3001 (admin password in your local `.env`) |
 | Prometheus | http://localhost:9090 |
 | Loki / Tempo | http://localhost:3100 / http://localhost:3200 |
@@ -59,9 +62,10 @@ All host ports bind to `127.0.0.1`. The authoritative port map is [.env.example]
 pnpm install --frozen-lockfile
 pnpm nx show projects
 pnpm lint; pnpm typecheck; pnpm test; pnpm build   # Nx run-many (test/build include the Maven service)
-pnpm contracts:validate                            # Redocly lint of libs/contracts/openapi/platform-api.yaml
+pnpm contracts:validate                            # Redocly lint (OpenAPI + AsyncAPI) + strict JSON Schema compile
 pnpm db:info; pnpm db:validate; pnpm db:migrate    # Flyway runner (docker compose run)
-pnpm e2e                                           # Playwright smoke + live contract tests (stack must be up)
+pnpm e2e                                           # Playwright: smoke, two-browser chat, live API/event contracts (stack must be up)
+docker compose -f docker-compose.yml -f docker-compose.apps.yml logs -f modulithplatformservice centrifugo postgres
 pnpm verify                                        # everything above + health/telemetry checks, PASS/FAIL summary
 ```
 
@@ -82,7 +86,8 @@ apps/chatwidget              Lit widget + demo page (chatwidget)
 libs/designsystem            CSS design tokens (designsystem)
 libs/componentLibrary/react  React components (component-library-react)
 libs/componentLibrary/web    Lit web components (component-library-web)
-libs/contracts               OpenAPI + JSON Schema (contracts)
+libs/contracts               OpenAPI, AsyncAPI, JSON Schema (contracts)
+libs/chat-client             framework-agnostic chat API + Centrifuge client (chat-client)
 services/modulithplatformservice  Spring Boot modular monolith (modulithplatformservice)
 database/flywayMigration     Flyway runner image + SQL (flyway-migration)
 database/postgres-init       one-time role/schema bootstrap for the local DB

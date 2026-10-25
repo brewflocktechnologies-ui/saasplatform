@@ -1,11 +1,18 @@
 # chatwidget
 
-Lit 3 + Vite app containing the framework-independent `<chat-platform-widget>` custom element and its demo page.
-Local POC only: messages are kept in memory and never sent to a server.
+Lit 3 + Vite app containing the framework-independent `<chat-platform-widget>` custom element.
+
+- `/` — overview + standalone `<cp-status-badge>`.
+- `/demo` — live chat as demo visitor `userone`: history from the API (PostgreSQL), live updates from Centrifugo,
+  connection state, send errors. **LOCAL POC — NOT REAL AUTHENTICATION.** See docs/features/local-chat-mvp.md.
+
+Attributes: `api-base-url` (default `http://localhost:8080`), `realtime-url` (default
+`ws://localhost:8000/connection/websocket`); build-time overrides `VITE_PUBLIC_API_BASE_URL`,
+`VITE_PUBLIC_CENTRIFUGO_WS_URL`. Never put secrets in `VITE_*`.
 
 | Command | |
 |---|---|
-| `pnpm dev:widget` | Vite dev server on http://localhost:5173 |
+| `pnpm dev:widget` | Vite dev server on http://localhost:5173 (`/demo` for the chat) |
 | `pnpm nx build chatwidget` | production bundle → `dist/apps/chatwidget` |
 | `pnpm nx run chatwidget:preview` | serve the production bundle on :5173 |
 | `pnpm nx test chatwidget` | Vitest (jsdom) component tests |
@@ -18,7 +25,7 @@ Local POC only: messages are kept in memory and never sent to a server.
 ```html
 <link rel="stylesheet" href="<widget-origin>/assets/main-*.css" /> <!-- or your own copy of tokens.css -->
 <script type="module" src="<widget-origin>/embed/chat-platform-widget.v1.js"></script>
-<chat-platform-widget greeting="Hello!"></chat-platform-widget>
+<chat-platform-widget api-base-url="https://api.example" realtime-url="wss://rt.example/connection/websocket"></chat-platform-widget>
 ```
 
 Breaking changes to the element API require a new `v2` entry. No CDN pipeline yet. The bundle contains no

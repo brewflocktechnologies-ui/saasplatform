@@ -46,7 +46,20 @@ function New-Secret([int]$bytes = 24) {
 
 $envFile = Join-Path $root '.env'
 if (Test-Path $envFile) {
-  Write-Host 'OK   .env already exists - left unchanged'
+  # Never change existing values; only append keys that newer versions of .env.example introduced.
+  $existing = @{}
+  Get-Content $envFile | ForEach-Object { if ($_ -match '^([A-Z0-9_]+)=') { $existing[$Matches[1]] = $true } }
+  $added = @()
+  $missing = Get-Content (Join-Path $root '.env.example') | Where-Object { $_ -match '^([A-Z0-9_]+)=' -and -not $existing[$Matches[1]] } | ForEach-Object {
+    $key = ($_ -split '=', 2)[0]; $added += $key
+    if ($_ -match '=__generate__$') { "$key=$(New-Secret)" } else { $_ }
+  }
+  if ($missing) {
+    [System.IO.File]::AppendAllText($envFile, "`n" + (($missing -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+    Write-Host "OK   .env kept; appended new keys: $($added -join ', ') (values not printed)"
+  } else {
+    Write-Host 'OK   .env already exists and is complete - left unchanged'
+  }
 } else {
   $lines = Get-Content (Join-Path $root '.env.example') | ForEach-Object {
     if ($_ -match '^([A-Z0-9_]+)=__generate__$') { "$($Matches[1])=$(New-Secret)" } else { $_ }

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chat-platform.local/chat/message-created.v1.schema.json",
+  "title": "MessageCreatedEvent",
+  "description": "Published after the message is committed, on chat:conversation:<id> and (as an inbox refresh signal) on chat:inbox. Not a source of history: clients reload from the API.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "conversationId",
+    "message"
+  ],
+  "properties": {
+    "type": {
+      "const": "message.created"
+    },
+    "conversationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "message": {
+      "$ref": "message.v1.schema.json"
+    }
+  }
+}

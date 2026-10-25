@@ -11,14 +11,11 @@ scrape_configs:
     static_configs:
       - targets: ['otel-collector:8888']
 
-  # The backend runs either on the host (Mode A: pnpm dev:backend) or as a container (Mode B).
-  # Both targets are listed; only the one for the active mode is UP. Dashboards use max(up{job=...}).
+  # Mode A: backend runs on the host (pnpm dev:backend). Mode B replaces this file with prometheus.containers.yml
+  # (see docker-compose.apps.yml) so each mode has exactly one backend target and no double-counted series.
   - job_name: modulithplatformservice
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ['host.docker.internal:8080']
         labels:
           mode: host
-      - targets: ['modulithplatformservice:8080']
-        labels:
-          mode: container

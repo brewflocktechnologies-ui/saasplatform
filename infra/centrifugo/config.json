@@ -6,7 +6,17 @@
     "port": "8000"
   },
   "client": {
-    "allowed_origins": ["http://localhost:3000", "http://localhost:5173"]
+    "allowed_origins": ["http://localhost:3000", "http://localhost:5173"],
+    "subscription_token": {
+      "enabled": true
+    }
+  },
+  "channel": {
+    "namespaces": [
+      {
+        "name": "chat"
+      }
+    ]
   },
   "admin": {
     "enabled": false

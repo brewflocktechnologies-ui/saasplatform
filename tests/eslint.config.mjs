@@ -6,6 +6,8 @@ export default [
   ...baseConfig,
   {
     files: ['**/*.ts'],
-    rules: {},
+    rules: {
+      'playwright/expect-expect': ['warn', { assertFunctionNames: ['expectProblem', 'expectValid'] }],
+    },
   },
 ];

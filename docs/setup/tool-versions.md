@@ -16,7 +16,10 @@ start.spring.io metadata). No prereleases.
 | Lit | 3.3.3 | https://lit.dev/docs/getting-started/ |
 | Vite / Vitest | 8.3.5 / 5.0.x | Vite 8 uses Rolldown |
 | Playwright | 1.64.1 (Chromium) | https://playwright.dev/docs/intro |
-| Redocly CLI | 2.71.0 | OpenAPI 3.1 lint |
+| Redocly CLI | 2.71.0 | OpenAPI 3.1 + AsyncAPI 3.0 lint |
+| `centrifuge` (JS SDK) | 5.8.0 (verified 2026-10-25) | Official Centrifugal SDK; v5 SDK supports Centrifugo v6 server. https://www.npmjs.com/package/centrifuge |
+| Nimbus JOSE + JWT | 10.10 (verified 2026-10-25) | HS256 connection/subscription tokens; not managed by Spring Boot, pinned in `pom.xml` |
+| `pg` (tests only) | 8.23.1 | read-only DB assertion in Playwright E2E |
 | JDK | 25 (host: 25.0.3 for validation; images: Temurin `25.0.4.1_1`) | Host default is JDK 27 — see note below |
 | Maven | 3.10.0 via Maven Wrapper 3.3.4 | No global Maven needed |
 | Spring Boot | 4.1.2 | Java 17–27 supported; https://docs.spring.io/spring-boot/system-requirements.html |
@@ -58,6 +61,11 @@ GitHub Actions used: `actions/checkout@v7`, `actions/setup-node@v7`, `actions/se
 - Spring Boot 4 OTLP properties are `management.opentelemetry.{tracing,logging}.export.otlp.endpoint`
   (checked in the `spring-boot-opentelemetry` configuration metadata). Log export needs the Logback OTel appender.
 - Docker Compose v5 `up --wait` treats a one-shot service that exits 0 (Flyway) as successful.
+- Centrifugo v6.10.2 config keys checked with `centrifugo defaultconfig -d` / `defaultenv`:
+  `client.subscription_token.enabled` + `CENTRIFUGO_CLIENT_SUBSCRIPTION_TOKEN_HMAC_SECRET_KEY`, `channel.namespaces`
+  (namespace defaults deny client subscribe/publish), `http_api.key`. Server API: `POST /api/publish` with `X-API-Key`.
+- `centrifuge` SDK reports a server-side subscription denial (code 103) as an `unsubscribed` event, not `error`.
+- PostgreSQL 18 provides `uuidv7()`; used as the default for chat ids (time-ordered).
 
 ## Updating versions
 

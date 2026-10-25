@@ -43,6 +43,7 @@ services:
     command: centrifugo --config=/centrifugo/config.json
     environment:
       CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY: ${CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY:?run scripts/dev-setup.ps1 to create .env}
+      CENTRIFUGO_CLIENT_SUBSCRIPTION_TOKEN_HMAC_SECRET_KEY: ${CENTRIFUGO_CLIENT_SUBSCRIPTION_TOKEN_HMAC_SECRET_KEY:?run scripts/dev-setup.ps1 to update .env}
       CENTRIFUGO_HTTP_API_KEY: ${CENTRIFUGO_HTTP_API_KEY:?run scripts/dev-setup.ps1 to create .env}
     ports:
       - '127.0.0.1:${CENTRIFUGO_HOST_PORT:-8000}:8000'

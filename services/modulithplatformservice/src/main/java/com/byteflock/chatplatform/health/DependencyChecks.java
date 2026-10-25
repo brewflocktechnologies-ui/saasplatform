@@ -25,9 +25,9 @@ class DependencyChecks {
 
 	private final HttpClient http = HttpClient.newBuilder().connectTimeout(TIMEOUT).build();
 
-	DependencyChecks(JdbcClient jdbc, @Value("${app.dependencies.centrifugo-health-url}") URI centrifugoHealthUrl) {
+	DependencyChecks(JdbcClient jdbc, @Value("${app.centrifugo.url}") URI centrifugoUrl) {
 		this.jdbc = jdbc;
-		this.centrifugoHealthUrl = centrifugoHealthUrl;
+		this.centrifugoHealthUrl = centrifugoUrl.resolve("/health");
 	}
 
 	DependencyStatus database() {

@@ -4,9 +4,10 @@ Configuration mounted read-only into the local Compose services (`docker-compose
 
 | Path | Service |
 |---|---|
-| `centrifugo/config.json` | Centrifugo v6: port 8000, explicit `allowed_origins` (dashboard + widget), admin disabled, `/health` enabled. Secrets (`CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY`, `CENTRIFUGO_HTTP_API_KEY`) come from `.env`. |
+| `centrifugo/config.json` | Centrifugo v6: port 8000, explicit `allowed_origins`, namespace `chat` (client subscribe/publish denied), subscription tokens enabled, admin disabled, `/health`. Secrets (`CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY`, `CENTRIFUGO_CLIENT_SUBSCRIPTION_TOKEN_HMAC_SECRET_KEY`, `CENTRIFUGO_HTTP_API_KEY`) come from `.env`. |
 | `observability/otel-collector.yaml` | OTLP receivers (4317/4318) → traces to Tempo (`otlp_grpc`), logs to Loki (`otlp_http` → `/otlp`); own metrics on :8888; health on :13133 |
-| `observability/prometheus.yml` | scrapes Prometheus, Collector, backend `/actuator/prometheus` (host and container targets) |
+| `observability/prometheus.yml` | Mode A: scrapes Prometheus, Collector, backend on the host |
+| `observability/prometheus.containers.yml` | Mode B (mounted by `docker-compose.apps.yml`): same, backend container target only |
 | `observability/tempo.yaml` | Tempo 3.1 single binary, local storage |
 | `observability/loki.yaml` | Loki 3.7 single binary, filesystem, tsdb v13 + structured metadata (needed for OTLP) |
 | `observability/grafana/provisioning` | datasources (Prometheus, Tempo↔Loki trace/log links) + dashboard provider |

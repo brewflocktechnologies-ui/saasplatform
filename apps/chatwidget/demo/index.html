@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Chat Widget — Visitor demo (userone)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="poc-banner" role="note"><strong>LOCAL POC — NOT REAL AUTHENTICATION.</strong> Fixed demo identity.</p>
+        <h1>Visitor demo</h1>
+        <p class="muted">
+          You are <strong data-testid="demo-visitor">Demo visitor: userone</strong>. Messages are saved in PostgreSQL by
+          the backend and delivered live through Centrifugo. Open
+          <a href="http://localhost:3000/agent">the agent dashboard</a> (as <code>agentbob</code>) in another browser to
+          reply.
+        </p>
+      </header>
+      <chat-platform-widget></chat-platform-widget>
+    </main>
+  </body>
+</html>

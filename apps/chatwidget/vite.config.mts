@@ -9,6 +9,8 @@ export default defineConfig(() => ({
   // Same host port in dev, preview and container mode (http://localhost:5173), matching the CORS allow-list.
   server: { port: 5173, strictPort: true, host: 'localhost' },
   preview: { port: 5173, strictPort: true, host: 'localhost' },
+  // Multi-page: / (overview) and /demo (live visitor chat).
+  appType: 'mpa',
   resolve: { tsconfigPaths: true },
   plugins: [nxReadySignal()],
   build: {
@@ -19,6 +21,7 @@ export default defineConfig(() => ({
     rollupOptions: {
       input: {
         main: resolve(import.meta.dirname, 'index.html'),
+        demo: resolve(import.meta.dirname, 'demo/index.html'),
         embed: resolve(import.meta.dirname, 'src/embed/v1.ts'),
       },
       output: {

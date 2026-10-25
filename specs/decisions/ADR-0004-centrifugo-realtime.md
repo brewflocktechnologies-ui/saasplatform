@@ -1,6 +1,6 @@
 # ADR-0004: Centrifugo as the real-time server
 
-- **Status:** Accepted (infrastructure only; usage design pending)
+- **Status:** Accepted (used by the chat MVP since 2026-10-25)
 - **Date:** 2026-10-25
 
 ## Context
@@ -22,6 +22,9 @@ etc.) is introduced in this setup; Centrifugo's in-memory engine is enough local
 ## Consequences
 
 - Needs a Redis/NATS-backed engine for multi-node Centrifugo in UAT/production (decide in a later spec).
-- **Not production-safe yet:** no channel namespaces, no token issuing, no authorization. The first real-time feature
-  spec must define tenant-scoped channels, token claims/TTL and the publish path before UAT.
-- Validated: container healthy via `/health`, local secrets from `.env`, admin disabled, explicit allowed origins.
+- Chat MVP (specs/mvpsetup.spec.md) uses: namespace `chat` with client publish/subscribe denied, connection JWTs and
+  separate-secret subscription JWTs bound to actor + exact channel, backend publication via the HTTP API after commit.
+- **Still not production-safe:** demo identities are hardcoded; real authentication, tenant-scoped channels, an outbox
+  and a multi-node engine are required before UAT.
+- Validated: container healthy via `/health`; invalid connection token → disconnect 3500; token-less subscription
+  → 103; client publish → 103; live delivery both ways in the two-browser E2E test.

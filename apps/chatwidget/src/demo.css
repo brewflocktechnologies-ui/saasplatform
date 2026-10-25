@@ -24,3 +24,10 @@ main {
 code {
   font-family: var(--cp-font-family-code);
 }
+.poc-banner {
+  margin: 0 0 var(--cp-spacing-sm);
+  padding: var(--cp-spacing-sm) var(--cp-spacing-md);
+  border: var(--cp-border-width-1) solid var(--cp-color-warning);
+  border-radius: var(--cp-radius-control);
+  color: var(--cp-color-warning);
+}

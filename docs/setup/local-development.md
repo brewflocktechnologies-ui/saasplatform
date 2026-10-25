@@ -24,18 +24,20 @@ powershell -ExecutionPolicy Bypass -File scripts/dev-setup.ps1
 ```
 
 The script checks prerequisites, creates `.env` from `.env.example` **only if it does not exist** (random hex
-secrets for PostgreSQL roles, Centrifugo and Grafana; values are never printed), runs
+secrets for PostgreSQL roles, Centrifugo and Grafana; values are never printed). If `.env` exists it never changes
+existing values; it only **appends keys added to `.env.example` later** (e.g. the chat MVP's
+`CENTRIFUGO_CLIENT_SUBSCRIPTION_TOKEN_HMAC_SECRET_KEY`). Rerun it after pulling. Then it runs
 `pnpm install --frozen-lockfile` and installs Playwright's Chromium. It is safe to rerun.
 
 ## 3. Ports (authoritative map: `.env.example`)
 
 | Service | Host URL | Container |
 |---|---|---|
-| Dashboard | http://localhost:3000 | `chatdashboardapp:3000` |
-| Widget demo | http://localhost:5173 (dev, preview and container mode) | `chatwidget:8080` |
+| Dashboard | http://localhost:3000, agent inbox `/agent` | `chatdashboardapp:3000` |
+| Widget | http://localhost:5173, visitor chat `/demo` (dev, preview and container mode) | `chatwidget:8080` |
 | Backend | http://localhost:8080 | `modulithplatformservice:8080` |
 | PostgreSQL | 127.0.0.1:5432 | `postgres:5432` |
-| Centrifugo | http://localhost:8000 | `centrifugo:8000` |
+| Centrifugo | http://localhost:8000 (WebSocket `/connection/websocket`) | `centrifugo:8000` |
 | Prometheus | http://localhost:9090 | `prometheus:9090` |
 | Grafana | http://localhost:3001 | `grafana:3000` |
 | Loki | http://localhost:3100 | `loki:3100` |
@@ -85,6 +87,12 @@ Order is enforced with health conditions: postgres healthy → flyway-migration 
 healthy (`/actuator/health/readiness`) → dashboard and widget. Mode B uses the same host ports as Mode A; stop the
 host dev servers first.
 
+### Chat MVP (two browsers)
+
+Browser A → http://localhost:5173/demo (visitor `userone`), Browser B → http://localhost:3000/agent (agent
+`agentbob`). Works in both modes. Details, API, events and limitations:
+[docs/features/local-chat-mvp.md](../features/local-chat-mvp.md). **LOCAL POC — NOT REAL AUTHENTICATION.**
+
 ## 5. Credentials policy
 
 - All secrets live only in the git-ignored `.env`, generated per machine. `.env.example` holds placeholders.
@@ -94,7 +102,9 @@ host dev servers first.
 - Connect with psql inside the container (no password typed or printed):
   `docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'`
 - Grafana: user `admin`, password = `GRAFANA_ADMIN_PASSWORD` in `.env`.
-- Centrifugo admin UI is disabled. No client tokens are issued yet.
+- Centrifugo admin UI is disabled. Three Centrifugo secrets (connection-token HMAC, subscription-token HMAC, HTTP
+  API key) live only in `.env` and are passed to Centrifugo and the backend — never to browser config
+  (`PUBLIC_*` / `VITE_*`). Browsers receive only short-lived JWTs from `/api/v1/demo/realtime/*`.
 
 ## 6. Tests and checks
 
@@ -136,8 +146,11 @@ Every API response carries `X-Trace-Id`; search it in Tempo or Loki.
    - Tempo: Explore → Tempo → TraceQL `{ resource.service.name = "modulithplatformservice" }` or paste a trace id.
 4. Pipeline: backend → OTLP HTTP → Collector → Tempo (traces, gRPC) and Loki (logs, `/otlp`). Metrics are scraped
    by Prometheus from `/actuator/prometheus` (only exposed with the `local` profile) and from the Collector (`:8888`).
-   In Mode A only the `host` target is UP; in Mode B both appear UP because the container port is also published
-   to the host — dashboards use `max(up)`.
+   Each mode scrapes exactly one backend target: Mode A uses `infra/observability/prometheus.yml`
+   (`host.docker.internal:8080`); Mode B (`docker-compose.apps.yml`) mounts `prometheus.containers.yml`
+   (`modulithplatformservice:8080`) instead, so series are never double-counted.
+5. Chat: panels *Chat messages persisted*, *Centrifugo publications by outcome*, *Chat logs*. Recipe and queries:
+   [docs/features/local-chat-mvp.md](../features/local-chat-mvp.md#observability).
 
 ## 9. Troubleshooting
 

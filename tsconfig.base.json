@@ -10,10 +10,7 @@
     "importHelpers": true,
     "target": "es2015",
     "module": "esnext",
-    "lib": [
-      "es2020",
-      "dom"
-    ],
+    "lib": ["es2020", "dom"],
     "skipLibCheck": true,
     "skipDefaultLibCheck": true,
     "strict": false,
@@ -24,16 +21,12 @@
       "@chat-platform/component-library-web": [
         "./libs/componentLibrary/web/src/index.ts"
       ],
-      "@chat-platform/designsystem": [
-        "./libs/designsystem/src/index.ts"
-      ],
+      "@chat-platform/designsystem": ["./libs/designsystem/src/index.ts"],
       "@chat-platform/designsystem/tokens.css": [
         "./libs/designsystem/tokens/index.css"
-      ]
+      ],
+      "@chat-platform/chat-client": ["./libs/chat-client/src/index.ts"]
     }
   },
-  "exclude": [
-    "node_modules",
-    "tmp"
-  ]
+  "exclude": ["node_modules", "tmp"]
 }

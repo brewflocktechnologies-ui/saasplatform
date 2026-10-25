@@ -30,10 +30,11 @@ test.describe('dashboard', () => {
     await expect(page.getByTestId('status-error')).toContainText('Cannot reach the backend');
   });
 
-  test('links to the widget demo', async ({ page }) => {
+  test('links to the agent inbox and the widget demo', async ({ page }) => {
     await page.goto('/');
+    await expect(page.getByTestId('agent-link')).toHaveAttribute('href', '/agent');
     const link = page.getByTestId('widget-demo-link');
-    await expect(link).toHaveAttribute('href', urls.widget);
+    await expect(link).toHaveAttribute('href', `${urls.widget}/demo`);
     const [popup] = await Promise.all([page.waitForEvent('popup'), link.click()]);
     await expect(popup.locator('chat-platform-widget')).toBeVisible();
   });

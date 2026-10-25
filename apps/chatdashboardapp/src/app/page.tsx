@@ -40,13 +40,22 @@ export default function Index() {
         </section>
 
         <section className="card" aria-labelledby="widget-heading">
-          <h2 id="widget-heading">Chat widget demo</h2>
+          <h2 id="widget-heading">Local chat MVP</h2>
           <p className="muted">
-            The embeddable <code>&lt;chat-platform-widget&gt;</code> runs as its own app.
+            Two demo identities (LOCAL POC — not real authentication). Use two separate browsers.
           </p>
-          <a href={widgetDemoUrl} target="_blank" rel="noreferrer" data-testid="widget-demo-link">
-            Open the widget demo
-          </a>
+          <ul>
+            <li>
+              <a href="/agent" data-testid="agent-link">
+                Agent inbox (agentbob)
+              </a>
+            </li>
+            <li>
+              <a href={`${widgetDemoUrl}/demo`} target="_blank" rel="noreferrer" data-testid="widget-demo-link">
+                Visitor widget demo (userone)
+              </a>
+            </li>
+          </ul>
         </section>
       </div>
     </main>
