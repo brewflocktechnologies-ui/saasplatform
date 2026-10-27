@@ -34,9 +34,19 @@ Rocket.Chat by a millisecond timestamp, Zulip by a global id that is not commit-
 
 Option 1 (overview D4, ruling R2), plus D5 idempotency:
 
-- The send transaction (READ COMMITTED) is: lock the conversation row → participant check → lifecycle policy →
-  idempotency lookup → `last_sequence + 1` → insert message → update the conversation (activity, transition, sender
-  participant, sender read cursor) → outbox row → state event → commit. Nothing in it calls the network.
+- Persistence approach (master spec 4.1 asks to record it in an ADR): `JdbcClient` with hand-written, parameterised
+  SQL, the existing service's convention (**existing:** `chat/ChatRepository.java`, `bootstrap/BootstrapRepository.java`;
+  no JPA dependency; overview D3), in `TransactionTemplate`
+  transactions at READ COMMITTED with explicit row locks. No JPA/Hibernate entity graphs: a history page and an inbox
+  page are each one bounded keyset `SELECT` over an index, the write path needs exact control of lock order and of the
+  statements inside the lock, and every statement must carry its tenant predicate visibly (ADR-0008). Spring Data JDBC
+  was not chosen because its aggregate loading would hide those statements. Every module that owns tables follows the
+  same approach (R-P31 M12).
+- The send transaction (READ COMMITTED) is: lock the conversation row → participant check → idempotency lookup →
+  lifecycle policy → `last_sequence + 1` → insert message → update the conversation (activity, transition, sender
+  participant, sender read cursor) → outbox row → state event → commit. The idempotency lookup precedes the lifecycle
+  policy, so a retry of a stored message is answered with the original even after a resolve or archive (R-P24;
+  master spec 5.5). Nothing in the transaction calls the network.
 - `sequence` is gap-free, numbers messages only, and is the history cursor (`before=` / `after=`). Conversation events
   carry `version` instead (R3).
 - `clientMessageId` (1 to 64 characters) is required from browser clients; unique per `(conversation_id, sender_type,
@@ -53,11 +63,16 @@ Option 1 (overview D4, ruling R2), plus D5 idempotency:
 - Sends to one conversation queue on its row lock for the length of the transaction (a few statements, no network).
   The same row is also locked by lifecycle commands and assignment projections, so a busy conversation's commands wait
   behind its sends.
-- Every transaction that writes a conversation locks that one row first and takes no other row lock first, which keeps
-  lock ordering simple and avoids deadlocks between these writers.
+- Lock order is conversation first, then child rows: every transaction that writes a conversation takes its row lock
+  (`FOR UPDATE`) before any other row lock, and a read-cursor write first takes `FOR KEY SHARE` on the conversation row
+  and only then upserts the cursor (R-P26). The send transaction upserts the sender's cursor after its conversation
+  lock, so without the key-share lock a first read and a first send by the same participant would wait for each other
+  (deadlock `40P01`); with it, the cursor write waits for an in-flight send instead
+  (`ReadCursorIT.firstReadRacingFirstSendDoesNotDeadlock`).
 - Idempotency costs one unique index, one SHA-256 per send and one indexed lookup; a replay writes nothing.
-- A retry after the conversation was archived (or resolved, for agents) gets the lifecycle 409 even though the original
-  message is stored, because the lifecycle check precedes the lookup; clients reconcile through history.
+- A retry with the same key and body after the conversation was archived (or resolved, for agents) returns the original
+  message with 200, because the lookup precedes the lifecycle check (R-P24). Only a purged conversation, which has no
+  messages left, answers such a retry with the lifecycle 409.
 
 ## Operational impact
 

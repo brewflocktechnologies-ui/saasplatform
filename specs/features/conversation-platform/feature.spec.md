@@ -9,8 +9,9 @@
   [ADR-0008](../../decisions/ADR-0008-tenant-isolation-and-local-identity.md), [ADR-0009](../../decisions/ADR-0009-allocation-service-integration.md)
 - **Design:** [system overview](../../../docs/architecture/system-overview.md) and the documents it indexes; plan set
   [00-overview](../../../docs/superpowers/plans/2026-10-27-conversation-platform-00-overview.md) (decisions `D1` to
-  `D20`, glossary §5; §8 there lists the rulings that changed the plans); rulings `R1` to `R16` and `R-P1` to `R-P21` in
-  system-overview.md section 7.
+  `D20`, glossary §5; §8 there lists the rulings that changed the plans); rulings `R1` to `R16` and `R-P1` to `R-P31` in
+  system-overview.md section 7, which also states the precedence order (rulings > design documents > overview > Plans
+  02 to 07, R-P31 M13).
 
 ## 1. Problem and desired outcome
 
@@ -90,8 +91,9 @@ integrity and security", `18-L` = "Local platform").
 - **US-7** As an agent I want resolve, pending, archive, unarchive and reopen to follow one documented state machine.
   - AC-7.1 Every status × archive × command case answers as in [domain-model.md](../../../docs/architecture/domain-model.md)
     section 5.2 (18-F7).
-  - AC-7.2 A repeated command is a 200 no-op; a stale `expectedVersion` is 409 `STALE_VERSION`; two conflicting
-    commands with one version give one 200 and one 409 (18-D6).
+  - AC-7.2 A repeated command is a 200 no-op (on an archived conversation only `RESOLVE` and `ARCHIVE` are; `REOPEN`
+    and `MARK_PENDING` there are 409 `CONVERSATION_ARCHIVED`, R-P31 M14); a stale `expectedVersion` is 409
+    `STALE_VERSION`; two conflicting commands with one version give one 200 and one 409 (18-D6).
   - AC-7.3 A contact message into `RESOLVED` reopens it (`REOPENED_BY_CONTACT`); into an archived conversation it is 409
     `CONVERSATION_ARCHIVED` and the widget offers a new conversation.
   - AC-7.4 An archived conversation leaves the default list and appears with `archived=true`; unarchive or reopen that
@@ -106,8 +108,9 @@ integrity and security", `18-L` = "Local platform").
 - **US-9** As an operator I want a retention dry run and a bounded purge.
   - AC-9.1 A dry run reports counts and changes nothing (18-F9).
   - AC-9.2 A purge deletes only eligible conversations' messages, attachment rows, cursors and outbox rows in bounded
-    batches, archives them, keeps conversation and state-event rows, and records the run; a tenant on legal hold is
-    untouched (18-F9).
+    batches (eligible: resolved, or archived, before the cutoff, R-P25), leaves them archived and `RESOLVED`, keeps
+    conversation and state-event rows, and records the run; a tenant on legal hold is untouched, also when the hold is
+    set during a run (18-F9, R-P31 M9).
 - **US-10** As a tenant I want my data isolated and consistent under concurrency.
   - AC-10.1 Retrying a send with the same `clientMessageId` and body yields one row; a different body is 409 (18-D1).
   - AC-10.2 No API read or write and no subscription token crosses tenants, and a contact cannot read another contact's
@@ -146,7 +149,7 @@ required `code` and optional `traceId`, `reasonCodes`). All endpoints of overvie
 |---|---|---|---|
 | `POST /api/v1/widget/sessions` | public | `{widgetKey, externalId?, displayName?, sessionToken?}` → `{sessionToken, expiresAt, tenantId, inbox:{id,name}, contact:{id,displayName}}` | 02 |
 | `POST /api/v1/widget/conversations` | contact | start or resume → `ConversationView`, 201 created / 200 resumed | 02 |
-| `GET /api/v1/widget/conversations/{id}` | contact | → `ConversationView` (with `agentOnline`; `assignment` shows only `state` and `agentId`, R-P3) | 02, 04 |
+| `GET /api/v1/widget/conversations/{id}` | contact | → `ConversationView` (with `agentOnline`; `assignment` is `ContactAssignmentView {state, agentId}`, R-P3, R-P29) | 02, 04 |
 | `GET /api/v1/widget/conversations/{id}/messages?before=&after=&limit=` | contact | → `MessagePage` | 02 |
 | `POST /api/v1/widget/conversations/{id}/messages` | contact | `SendMessageRequest` → `MessageView`, 201 / 200 replay | 02 |
 | `POST /api/v1/widget/conversations/{id}/typing` | contact | `{typing}` → 202 | 03 |
@@ -184,8 +187,9 @@ required `code` and optional `traceId`, `reasonCodes`). All endpoints of overvie
   Every problem carries `traceId`.
 - **Events** (Centrifugo, at least once): channels `chat:conversation:<uuid>` and `chat:inbox:<tenantId>:<inboxUuid>`;
   envelope `{eventId, eventType, schemaVersion, tenantId, conversationId, occurredAt, data}`; types `message.created`,
-  `conversation.created`, `conversation.updated` (`change`), `typing`. Conversation event payloads carry the assignment's
-  `state` and `agentId` only (R-P3); agents read routing details with `GET /api/v1/agent/conversations/{id}`. JSON Schemas `libs/contracts/json-schema/chat/*.v1`
+  `conversation.created`, `conversation.updated` (`change`, including `ASSIGNMENT_UPDATED` for silent worker moves,
+  R-P23), `typing`. Conversation event payloads carry the assignment's `state` and `agentId` only, both keys always
+  present (R-P3, R-P29); agents read routing details with `GET /api/v1/agent/conversations/{id}`. JSON Schemas `libs/contracts/json-schema/chat/*.v1`
   and AsyncAPI `libs/contracts/asyncapi/chat-realtime.yaml` (Plan 03 T5); details in
   [realtime-and-recovery.md](../../../docs/architecture/realtime-and-recovery.md).
 - **Versioning / deprecation:** event schemas are versioned by file (`.v1`) and `schemaVersion`; consumers ignore
@@ -254,7 +258,15 @@ reading the engine state after `CONVERSATION_NOT_ALLOCATABLE` (Plan 02 `Lifecycl
 `failedRowProjectsLaterSweepAssignment`, `resolveOfFailedReleasesThroughEngine`, `releasePendingTenantMissingBecomesNone`,
 `assignNotAllocatableProjectsEngineState`, R-P17); `RealtimeTokenIT.unknownConversationChannelIs404` (Plan 03 T3, R-P6)
 and `inboxChannelOfOwnTenantUnknownIs404` (R-P18); `AssignmentApiIT.sameAgentReclaimIs200` (Plan 04 T4, R-P19);
-`contactViewHidesAssignmentInternals` asserting the hidden fields are absent (Plan 02 T4, R-P21).
+`contactViewHidesAssignmentInternals` asserting the contact `assignment` has exactly the keys `state` and `agentId`
+(Plan 02 T4, R-P21, R-P29). From the final review (R-P23 to R-P31): `AssignmentOrchestrationIT.everyProjectionWriteAppendsOneEvent`,
+`queuedPollIsSilent`, `stopsBatchWhenLeaseWouldExpire`, `archivedAfterClaimIsNotDispatched` (Plan 04 T3);
+`MessageWriteIT.replayAfterArchiveReturnsOriginal`, `replayAfterResolveReturnsOriginalForAgent`,
+`ReadCursorIT.firstReadRacingFirstSendDoesNotDeadlock`, `TenancyIT.refreshBeyondMaxAgeIsRejected` (Plan 02);
+`BackoffTest.hugeRetryIndexCapsAtMax`, `OutboxPublisherIT.stopsBatchWhenLeaseWouldExpire`, `transportFailuresNeverPark`
+(Plan 03 T2); `RetentionIT.archivedOpenConversationIsPurgedAndResolved`, `legalHoldSetDuringRunStopsBeforeNextBatch`,
+`purgedViewHasPurgedAtAndZeroUnread` (Plan 05 T1); `conversation-pane.spec.tsx: archiveAfterReleaseUsesFreshVersion`
+(Plan 06 T3) and the E2E release-then-archive step (Plan 06 T5).
 
 Design rules still without a named test (to add in the plan that owns the code):
 - `sync.ts`: a failed apply keeps the cursor and does a full reload (SI-6); an API head below `lastContiguous` does a

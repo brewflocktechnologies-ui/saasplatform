@@ -81,46 +81,61 @@ without telling anyone, which is why the worker reads before it writes and polls
 ## 3. Worker algorithm per `assignment_state`
 
 The state machine itself is in [domain-model.md](domain-model.md) section 6. `AssignmentWorker.runOnce()` claims a
-bounded batch, commits, then `AssignmentOrchestrator` processes each row outside the claim transaction:
+bounded batch (`app.assignment.batch-size`, 20, R-P28), commits, then `AssignmentOrchestrator` processes each row
+outside the claim transaction:
 
 ```sql
-UPDATE conversations
+WITH due AS MATERIALIZED (
+       SELECT id FROM conversations
+        WHERE ((assignment_state IN ('REQUESTED', 'QUEUED', 'FAILED') AND archived_at IS NULL)
+               OR assignment_state IN ('RELEASE_PENDING', 'REOPEN_PENDING'))
+          AND assignment_next_attempt_at <= :now
+        ORDER BY assignment_next_attempt_at
+        LIMIT :limit
+        FOR UPDATE SKIP LOCKED)
+UPDATE conversations c
    SET assignment_next_attempt_at = :now + :lease, assignment_attempts = assignment_attempts + 1
- WHERE id IN (SELECT id FROM conversations
-               WHERE ((assignment_state IN ('REQUESTED', 'QUEUED', 'FAILED') AND archived_at IS NULL)
-                      OR assignment_state IN ('RELEASE_PENDING', 'REOPEN_PENDING'))
-                 AND assignment_next_attempt_at <= :now
-               ORDER BY assignment_next_attempt_at
-               LIMIT :limit
-               FOR UPDATE SKIP LOCKED)
+  FROM due
+ WHERE c.id = due.id
 RETURNING …
 ```
 
-The index is `ix_conversations_assignment_due`; its predicate includes `FAILED`. The worker never dispatches an archived
+`MATERIALIZED` makes PostgreSQL evaluate the locked `LIMIT` subquery a single time (R-P31 M16). The index is
+`ix_conversations_assignment_due`; its predicate includes `FAILED`.
+
+Per-row lease rule (R-P28): the claim sets each row's lease end (`assignment_next_attempt_at = now + lease`). Before
+each engine call the worker continues only if `now + app.allocation.timeout` ≤ that lease end; otherwise it stops
+processing the rest of the batch, and those rows are claimed again after the lease. Right before a
+`createConversation` or `dispatch` call it also re-reads `(archived_at, assignment_state)` with a tenant-filtered
+`SELECT` and skips the row if either changed since the claim (for example, archived meanwhile: the archive already moved
+it to `RELEASE_PENDING`). This keeps two instances from working the same row at once; an engine call can still be repeated (a crash, a lost
+response), and the keys and the read-first reconciliation below make a repeat safe. The worker never dispatches an archived
 row (R-P13): archiving moves `REQUESTED`, `QUEUED`, `ASSIGNED`, `REOPEN_PENDING` and `FAILED` rows to `RELEASE_PENDING`
 (resolving does the same, R-P17), and the claim excludes archived `REQUESTED`/`QUEUED`/`FAILED` rows as a second guard.
 A claim is worker bookkeeping and does not change `version` (R-P9). A row entering `FAILED`, and each re-read that
 leaves it `FAILED`, gets `assignment_next_attempt_at = now + app.assignment.failed-poll` (60 s, R-P17); `QUEUED` rows
-that stay `QUEUED` get `now + queued-poll`.
+that stay `QUEUED` get `now + queued-poll`. Every projection that changes `(assignment_state, assigned_agent_id)`
+increments `version` and appends exactly one `conversation.updated` (the event named in the table; `ASSIGNMENT_UPDATED`
+where no other change fits); a write that changes neither is bookkeeping, with no event and no `version` change (R-P23).
 
 | Claimed state | Call | Allocation answer | New state (event) |
 |---|---|---|---|
 | `REQUESTED` | `findConversation` (V2) | absent | `createConversation` (V1; 409 `CONVERSATION_EXISTS`/`CONFLICT` = success) then `dispatch` (A1) → outcome table below |
 | | | `QUEUED` | `dispatch` (A1) → outcome table |
 | | | `ASSIGNED`, `ACCEPTED`, `ACTIVE` | `ASSIGNED`, agent from the record, `decisionId` null, reason `ALLOCATION_SWEEP` (event `ASSIGNED`) |
-| | | `RESOLVED` | `requeueReopen` (V4), stays `REQUESTED`, due now (R-P10) |
+| | | `RESOLVED` | `requeueReopen` (V4), stays `REQUESTED`, due now (R-P10); no event, no `version` change |
 | | | `CANCELLED` | `FAILED`, reason `ALLOCATION_CANCELLED` (event `ASSIGNMENT_FAILED`); the platform never cancels, so this is an alert (R-P10) |
 | `QUEUED` | `findConversation` only: `QUEUED` rows poll and never dispatch (R-P1) | `ASSIGNED`, `ACCEPTED`, `ACTIVE` | `ASSIGNED`, reason `ALLOCATION_SWEEP` (event `ASSIGNED`) |
-| | | `QUEUED` | stays `QUEUED`, next poll in `queued-poll` (5 s); no event |
-| | | absent | `REQUESTED` (the allocation side lost the record, F2: alert) |
-| | | `RESOLVED` / `CANCELLED` | as for `REQUESTED` |
-| `RELEASE_PENDING` | `resolve` (V3) | 200 | `NONE`, agent and decision cleared (state event `RELEASED`, no realtime event) |
+| | | `QUEUED` | stays `QUEUED`, next poll in `queued-poll` (5 s); bookkeeping: it may update the stored reason, no event, no `version` change (R-P23) |
+| | | absent | `REQUESTED` (the allocation side lost the record, F2: alert) (event `ASSIGNMENT_UPDATED`, R-P23) |
+| | | `RESOLVED` / `CANCELLED` | as for `REQUESTED`: `requeueReopen` then `REQUESTED`, due now (event `ASSIGNMENT_UPDATED`), or `FAILED` (event `ASSIGNMENT_FAILED`) |
+| `RELEASE_PENDING` | `resolve` (V3) | 200 | `NONE`, agent and decision cleared (state event `RELEASED`, event `ASSIGNMENT_UPDATED`, R-P23) |
 | | | any 404 (`CONVERSATION_NOT_FOUND`, `TENANT_NOT_FOUND`) or 409 `CONVERSATION_CLOSED` | confirm with `findConversation` (research section 1, item 6; a missing tenant also answers 404 there, which reads as absent): `RESOLVED`, `CANCELLED` or absent → `NONE` as above; any other status → stays `RELEASE_PENDING` with backoff and a WARN log (R-P17) |
-| `REOPEN_PENDING` | `findConversation` | absent | `REQUESTED` |
-| | | `RESOLVED` | `requeueReopen` (V4 `{reason: REOPEN, excludePreviousAgent: false}`; 409 `INVALID_REQUEUE` counts as done only if a `findConversation` shows `QUEUED`) → `REQUESTED` |
+| `REOPEN_PENDING` | `findConversation` | absent | `REQUESTED` (event `ASSIGNMENT_UPDATED`, R-P23) |
+| | | `RESOLVED` | `requeueReopen` (V4 `{reason: REOPEN, excludePreviousAgent: false}`; 409 `INVALID_REQUEUE` counts as done only if a `findConversation` shows `QUEUED`) → `REQUESTED` (event `ASSIGNMENT_UPDATED`) |
 | | | `ASSIGNED`, `ACCEPTED`, `ACTIVE` (the release never reached the engine) | `ASSIGNED`, same agent, reason `REOPEN_KEPT_AGENT` (event `ASSIGNED`) |
 | | | `QUEUED` | `QUEUED` (event `ASSIGNMENT_QUEUED`) |
-| | | `CANCELLED` | `FAILED` |
+| | | `CANCELLED` | `FAILED` (event `ASSIGNMENT_FAILED`) |
 | `FAILED` | `findConversation` only, every `failed-poll` (60 s); never `dispatch` (R-P17) | `ASSIGNED`, `ACCEPTED`, `ACTIVE` (the engine's sweep assigned it later) | `ASSIGNED`, agent from the record, `decisionId` null, reason `ALLOCATION_SWEEP` (event `ASSIGNED`) |
 | | | anything else (`QUEUED`, absent, `RESOLVED`, `CANCELLED`) or an engine error | stays `FAILED`, next re-read in `failed-poll` (an engine error also reschedules to `failed-poll`, not to backoff, R-P20); no event, no `version` change |
 
@@ -133,8 +148,8 @@ Engine errors, for every claimed state (R-P2, R-P14, R-P15):
 
 | Error | Platform reaction |
 |---|---|
-| `AllocationUnavailableException` (connect or read timeout, 5xx) | state unchanged, `next = Backoff.next(now, attempts − 1, poll-delay, max-backoff, rng)`; no event. Except a `FAILED` row being re-read, which stays `FAILED` and reschedules to `now + failed-poll` (R-P20); the same exception applies to every other error in this table. |
-| 409 `CONCURRENT_MODIFICATION`, 409 `IDEMPOTENCY_RACE` | transient: as unavailable. The next attempt uses the next key; the engine's conversation lock and one-active-assignment index make a repeated dispatch safe. |
+| `AllocationUnavailableException` (connect or read timeout, 5xx) | state unchanged, `next = Backoff.next(now, attempts − 1, poll-delay, max-backoff, rng)` (index clamped to [0, 30], R-P27, section 4); no event. Except a `FAILED` row being re-read, which stays `FAILED` and reschedules to `now + failed-poll` (R-P20); the same exception applies to every other error in this table. |
+| 409 `CONCURRENT_MODIFICATION`, 409 `IDEMPOTENCY_RACE`, 409 `AGENT_VANISHED` (the agent a dispatch chose disappeared before the engine could lock it, engine `Dispatcher:349`; R-P31) | transient: as unavailable. The next attempt uses the next key; the engine's conversation lock and one-active-assignment index make a repeated dispatch safe. |
 | 404 `TENANT_NOT_FOUND`, 404 `QUEUE_NOT_FOUND`, 409 `NO_ACTIVE_POLICY` (allocation side not seeded yet) | `assignment_setup_failures + 1`, state unchanged, backoff; at `max-setup-attempts` (30) → `FAILED` with that code (overview §7 B). `RELEASE_PENDING` only backs off (a 404 `TENANT_NOT_FOUND` on its `resolve` is confirmed by a read instead, see above, R-P17). |
 | any other 4xx (`FEATURE_DISABLED`, `IDEMPOTENCY_KEY_REUSED`, `INVALID_ID`, …) on `REQUESTED`, `QUEUED`, `REOPEN_PENDING` | `FAILED` with the code (event `ASSIGNMENT_FAILED`), WARN log (R-P10) |
 | any other 4xx on `RELEASE_PENDING` | stays `RELEASE_PENDING` with backoff and a WARN log carrying the code; never `FAILED`, because the capacity must eventually be released |
@@ -147,14 +162,15 @@ Dispatch outcome table (A1; also used by `/assign`, section 5). Branch on `outco
 | `ASSIGNED` | `ASSIGNED`: agent, `decisionId`, reason, explanation (event `ASSIGNED`) | 200 view, `assignment.state = ASSIGNED` |
 | `QUEUED_NO_ELIGIBLE_AGENT`, `QUEUED_CAPACITY_EXHAUSTED`, `QUEUED_NO_AVAILABLE_AGENT`, `QUEUED_MANUAL_SELECTION`, `QUEUED_FEATURE_DISABLED` | `QUEUED`, reason = outcome, next poll in 5 s (event `ASSIGNMENT_QUEUED` on entering `QUEUED`). The last two need an operator or a claim; they stay visible. | 200 view, `assignment.state = QUEUED` with the reason (overview §7 F) |
 | `CONFLICT_RETRYABLE` (not stored by the engine) | stays `REQUESTED`, due after `poll-delay`; the next attempt dispatches with the next key (R-P1) | 409 `ALLOCATION_REJECTED`, detail `CONFLICT_RETRYABLE`: retry with the same `Idempotency-Key` (R-P10) |
-| `REJECTED_INVALID_INPUT` + `CONVERSATION_NOT_ALLOCATABLE` | reconcile: `findConversation`; assigned → `ASSIGNED` (`ALLOCATION_SWEEP`), anything else → `FAILED` | `findConversation`, project the engine state (section 5 step 4), then 200 when it is now assigned to the caller, else 409 `ALLOCATION_REJECTED` (`AssignmentApiIT.doubleClaimIsRejectedConsistently`, `assignNotAllocatableProjectsEngineState`; R-P17) |
+| `REJECTED_INVALID_INPUT` + `CONVERSATION_NOT_ALLOCATABLE` | reconcile: `findConversation`; assigned → `ASSIGNED` (`ALLOCATION_SWEEP`), anything else → `FAILED` | `findConversation`, project the engine state (section 5 step 4), then 200 when it is now assigned to the caller (`AssignmentApiIT.sameAgentReclaimIs200`, R-P19), else 409 `ALLOCATION_REJECTED` (`AssignmentApiIT.doubleClaimIsRejectedConsistently`); `assignNotAllocatableProjectsEngineState` covers both branches (R-P17) |
 | `REJECTED_INVALID_INPUT` with another reason (on a claim typically `AGENT_NOT_FOUND`: the claimer is not in the conversation's queue) | `FAILED`, reason = outcome (event `ASSIGNMENT_FAILED`) | 409 `ALLOCATION_REJECTED`, projection unchanged (R-P14) |
 | `CLAIM_REJECTED` (claim only) | n/a | 409 `ALLOCATION_REJECTED` with `reasonCodes`, projection unchanged (R-P14) |
 | `FAILED_INTERNAL`, `SKIPPED_POLICY_DISABLED`, `NO_WAITING_CONVERSATION` | `FAILED`, reason = outcome (event `ASSIGNMENT_FAILED`) | `FAILED` projection, 409 `ALLOCATION_REJECTED` |
 
-Visibility (R-P3): the projection's `decisionId`, `reason` and `explanation` are internal routing data. Contact callers
-and every `conversation.created`/`conversation.updated` payload see only `assignment.state` and `assignment.agentId`;
-the other fields are absent, not null (R-P21). The dashboard reads the rest with `GET /api/v1/agent/conversations/{id}` when an event changes the open conversation.
+Visibility (R-P3, R-P29): the projection's `decisionId`, `reason` and `explanation` are internal routing data. Contact
+callers and every `conversation.created`/`conversation.updated` payload get `assignment` as
+`ContactAssignmentView {state, agentId}`: both keys always present (`agentId` null when no agent holds it), the other
+fields absent. The dashboard reads the rest with `GET /api/v1/agent/conversations/{id}` when an event changes the open conversation.
 
 **Limitation (R-P14):** `ASSIGNED` rows are not claimed, so nothing reconciles them in the background in the MVP. A
 change made directly in the allocation service (its workbench or API: a requeue, reassign or resolve there) is not
@@ -187,6 +203,7 @@ reflected in the platform until a platform command touches the conversation.
 |---|---|---|
 | `app.assignment.enabled` (`APP_ASSIGNMENT_ENABLED`) | `true` | gates only the scheduled tick; tests call `runOnce()` |
 | `app.assignment.poll-delay` | 2 s | tick interval; retry after `CONFLICT_RETRYABLE`; backoff base |
+| `app.assignment.batch-size` | 20 | rows per claim; with up to three 3 s engine calls per row the per-row lease rule stops a batch before the 30 s lease ends (R-P28) |
 | `app.assignment.queued-poll` | 5 s | fixed poll interval of `QUEUED` rows (overview §7 C) |
 | `app.assignment.failed-poll` | 60 s | re-read interval of `FAILED` rows: `findConversation` only, no dispatch (R-P17) |
 | `app.assignment.lease` | 30 s | claim lease; a crashed worker's rows return after it |
@@ -197,8 +214,10 @@ reflected in the platform until a platform command touches the conversation.
 | policy `heartbeatTtlSeconds` = `app.presence.stale-after` | 60 s | presence freshness, both sides equal |
 
 Backoff (R-P15): `outbox.Backoff.next(now, n, base, max, rng) = now + min(base × 2^n ± 20 %, max)` with a 0-based
-`n`; the worker passes `n = attempts − 1`, `base = poll-delay`, `max = max-backoff`. Because `assignment_attempts` is
-monotonic, a row that has already been polled many times backs off at the 60 s cap on its first error. Accepted
+`n`, clamped to [0, 30] before exponentiating (R-P27: `assignment_attempts` reaches 62 and more within minutes of
+`QUEUED` polling, and `2^62` overflows); the worker passes `n = attempts − 1`, `base = poll-delay`, `max = max-backoff`.
+Because `assignment_attempts` is monotonic, a row that has already been polled many times backs off at the 60 s cap on
+its first error. Accepted
 (R-P16): the engine's own sweep keeps assigning queued conversations while it is up, and during an outage everything
 waits anyway; the cost is up to 60 s of extra assignment latency right after an outage ends.
 
@@ -213,17 +232,19 @@ Body `AssignRequest(mode, expectedVersion)`, header `Idempotency-Key`, agent of 
 |---|---|---|
 | `CLAIM` | `claim(tenant, key, id, caller.principalId())` (A2) | "Assign to me" (`action-assign-me`) |
 | `AUTO` | `dispatch(tenant, key, id)` (A1) | run the policy now (`action-auto-assign`) |
-| `REASSIGN` | `reassign(tenant, key, id)` (A3) | release the current agent and allocate again; the previous agent is always excluded, so a single-agent tenant ends `QUEUED` (`action-reassign`) |
+| `REASSIGN` | `reassign(tenant, key, id)` (A3) | release the current agent and allocate again; the previous agent is always excluded, so a single-agent tenant ends `QUEUED` (`action-reassign`). The exclusion is permanent for that conversation: the engine's `excludedAgentIds` only grows and no endpoint clears it, so the excluded agent can never be assigned or claim it again, also after a reopen (research section 1, item 5; R-P31 M11) |
 
 Order:
-1. Participant and tenant check (403); archived or `RESOLVED` → 409 `INVALID_TRANSITION`; `expectedVersion`, when
+1. Participant and tenant check (403); archived (purged included) → 409 `CONVERSATION_ARCHIVED`, like every other
+   command on an archived conversation (R-P31 M1); `RESOLVED` → 409 `INVALID_TRANSITION`; `expectedVersion`, when
    present and different → 409 `STALE_VERSION` (R-P10).
 2. If `assignment_state` is `REQUESTED` or `FAILED`, `createConversation` first (the record may not exist).
 3. Call the engine outside any transaction and handle the outcome with the table of section 3.
 4. `NOT_ASSIGNED` on `REASSIGN` (the engine holds no active assignment): `findConversation` and project what the engine
    holds (`ASSIGNED`/`ACCEPTED`/`ACTIVE` → `ASSIGNED` with that agent, `QUEUED` → `QUEUED`, absent or `RESOLVED` →
-   `REQUESTED` for the worker, `CANCELLED` → `FAILED`), then answer 409 `ALLOCATION_REJECTED` with detail
-   `NOT_ASSIGNED` (R-P14).
+   `REQUESTED` for the worker, `CANCELLED` → `FAILED`; each projection that changes the state appends its one event,
+   `ASSIGNMENT_UPDATED` for `REQUESTED`, R-P23), then answer 409 `ALLOCATION_REJECTED` with detail `NOT_ASSIGNED`
+   (R-P14).
 5. `REJECTED_INVALID_INPUT` with `CONVERSATION_NOT_ALLOCATABLE` (a sweep or another claim assigned the conversation
    first): the same read-and-project as step 4, then 200 with the agent view when the engine record is now assigned to
    the caller, else 409 `ALLOCATION_REJECTED` with detail `CONVERSATION_NOT_ALLOCATABLE`. A `FAILED` projection can
@@ -278,7 +299,7 @@ Rows marked **deviation** differ from the research recommendation on purpose (se
 | F10 | `REJECTED_INVALID_INPUT` | worker: reconcile for `CONVERSATION_NOT_ALLOCATABLE`, else `FAILED`; `/assign`: `CONVERSATION_NOT_ALLOCATABLE` reads and projects the engine state, then 200 (now assigned to the caller) or 409 (R-P17); other reasons 409, projection unchanged |
 | F11 | `CLAIM_REJECTED` | 409 to the agent with `reasonCodes`, projection unchanged |
 | F12 | `IDEMPOTENCY_KEY_REUSED`; `IDEMPOTENCY_RACE` | the first cannot happen by key design (`FAILED` and WARN if it does); the second is transient (backoff) |
-| (A3, V3, V4) | `CONCURRENT_MODIFICATION` | transient: backoff, next attempt (R-P14) |
+| (A3, V3, V4) | `CONCURRENT_MODIFICATION`; (A1) `AGENT_VANISHED` | transient: backoff, next attempt (R-P14, R-P31) |
 | F13 | Response lost | the next attempt uses the next key (**deviation**) and reconciles through the read-first step; resolve and requeue are confirmed by a read |
 | F14 | Engine rejects our data (`INVALID_ID`, …) | `FAILED` with the code, a bug (`RELEASE_PENDING`: backoff and WARN). `TIMESTAMP_IN_FUTURE` cannot occur: presence sends no timestamp (R-P4) |
 | F15 | Agent goes offline with assignments | nothing happens by design |

@@ -54,7 +54,9 @@ Option 1 (overview D8, D9):
 - Agents set availability with `PUT /api/v1/agent/presence`, forwarded to the engine without a timestamp so the engine
   stamps its own clock (R-P4; 60 s heartbeat TTL, 30 s dashboard heartbeat); the platform keeps no second
   availability store.
-- Projection changes emit `conversation.updated` through the outbox (ADR-0007).
+- Every projection change of `(assignment_state, assigned_agent_id)` emits exactly one `conversation.updated` through
+  the outbox and increments `version` (`change` `ASSIGNED`, `ASSIGNMENT_QUEUED`, `ASSIGNMENT_FAILED` or
+  `ASSIGNMENT_UPDATED`, R-P23; ADR-0007), so a silent worker move never stales an agent's `expectedVersion`.
 
 ## Consequences
 

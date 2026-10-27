@@ -39,8 +39,10 @@ Option 1 (overview D6):
   the event's `channels text[]` and the complete envelope as `payload`.
 - `OutboxPublisher` claims a batch (`batch-size` 100) in a short transaction, commits, publishes each row outside any
   transaction with `POST /api/broadcast` and `idempotency_key = eventId`, then marks it `PUBLISHED` or schedules a
-  retry: `min(1 s × 2^(attempts−1) ± 20 %, 60 s)` (`Backoff.next(now, attempts − 1, …)` with a 0-based index, R-P15),
-  attempts counted at claim, `PARKED` after 10 attempts, lease 30 s,
+  retry: `min(1 s × 2^(attempts−1) ± 20 %, 60 s)` (`Backoff.next(now, attempts − 1, …)` with a 0-based index, R-P15,
+  clamped to [0, 30], R-P27), attempts counted at claim, `PARKED` after 10 attempts only when the failure is a
+  non-transport one (a Centrifugo error object that is not `temporary`, or HTTP 4xx); transport failures (connection
+  refused, timeout, 5xx, `temporary` errors) keep retrying at up to 60 s and never park (R-P30); lease 30 s,
   poll 500 ms. Marks are guarded by `locked_by`. Parked rows are listed and replayed through the local-dev admin API.
 - **Delivery is at least once.** Clients deduplicate by `eventId`, message `id` and `sequence`, and reconcile from the
   API on every subscribe; no part of the platform depends on a stronger guarantee.
@@ -57,8 +59,10 @@ Option 1 (overview D6):
   `PUBLISHED` rows is NEXT.
 - Relay latency adds about the poll delay (500 ms) to every realtime delivery.
 - Clients must tolerate duplicates and out-of-order arrival (retries, two workers, two channels).
-- A Centrifugo outage longer than about 4 minutes parks events; the API reconcile still brings every client up to date,
-  but parked rows wait for an operator.
+- A Centrifugo outage parks nothing: its rows retry at up to 60 s and drain when it returns, so no window of events
+  waits for an operator (R-P30). A row that Centrifugo keeps rejecting parks after about 4 minutes; the API reconcile
+  still brings every client up to date, but a parked row waits for an operator. The cost: a Centrifugo that never comes
+  back is retried for ever at 60 s, visible in `outbox.pending.oldest_age_seconds`.
 
 ## Operational impact
 

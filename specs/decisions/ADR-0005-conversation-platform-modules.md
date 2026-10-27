@@ -72,7 +72,11 @@ Option 2, as overview D2:
 
 - One deployable and one connection pool. The scheduled workers (`OutboxPublisher`, `AssignmentWorker`) run in every
   backend instance; they are safe to run concurrently because they claim rows with `FOR UPDATE SKIP LOCKED` and
-  leases.
+  leases, and because of the per-row lease rule: before each Centrifugo or engine call a worker continues only if
+  `now + call timeout` ≤ the row's lease end, otherwise it stops the rest of its batch, which another instance claims
+  after the lease (R-P28; assignment batch size 20). The rule narrows but does not remove duplicates: the outbox may
+  still publish an event twice (a crash between publish and mark, a late mark), which at-least-once delivery and the
+  clients' deduplication by `eventId` absorb (ADR-0007).
 - `app.outbox.enabled` and `app.assignment.enabled` gate only the scheduled ticks, so an operator can stop a worker in
   one instance without a redeploy of the code.
 

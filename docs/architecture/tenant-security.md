@@ -34,11 +34,15 @@ startup fails if it is missing or too short, naming the variable without printin
 | `typ` | `contact` | `agent` |
 | `inbox` | inbox id (UUID) | absent |
 | `iat`, `exp` | issue time; `exp = iat + 24h` (`app.sessions.contact-ttl`) | `exp = iat + 12h` (`app.sessions.agent-ttl`) |
+| `auth_time` | first issue time of the contact's session: set when a session starts, copied unchanged into every refreshed token (R-P31 M4) | absent |
 
 - `exp` is checked against the injected `Clock`. A token signed with a Centrifugo secret, with an unknown `typ` or with
   a bad signature is rejected (`SessionTokensTest`).
-- `verifyForRefresh` accepts an expired `contact` token with a valid signature; only `POST /widget/sessions` uses it, so
-  a returning visitor keeps its contact. An expired agent token is never refreshed.
+- `verifyForRefresh` accepts an expired `contact` token with a valid signature as long as its `auth_time` is at most
+  `app.sessions.contact-refresh-max-age` (30 days) ago; only `POST /widget/sessions` uses it, so a returning visitor
+  keeps its contact for up to 30 days after the first issue. An older token is rejected with 401 `UNAUTHENTICATED`, and
+  the widget then starts a new session (`TenancyIT.refreshBeyondMaxAgeIsRejected`; R-P31 M4). A stolen contact token
+  therefore cannot be refreshed for ever. An expired agent token is never refreshed.
 - The verified token becomes `Caller(tenantId, type, principalId, inboxId)`; `AuthInterceptor` acts only on handler
   methods annotated `@RequiresPrincipal`, puts `tenantId` in the logging MDC, and lets CORS pre-flight `OPTIONS` and the
   two public endpoints pass.
@@ -71,7 +75,7 @@ Request bodies never carry a tenant id that the server trusts, except the admin 
 
 | Action | Contact | Agent of the tenant |
 |---|---|---|
-| Read a conversation, its history and its view | only its own: `contact_id = sub`, `inbox_id = inbox` claim, same tenant; the view's `assignment` shows only `state` and `agentId` (R-P3) | every conversation of every inbox of its tenant, with the full assignment |
+| Read a conversation, its history and its view | only its own: `contact_id = sub`, `inbox_id = inbox` claim, same tenant; the view's `assignment` is `ContactAssignmentView {state, agentId}` (R-P3, R-P29) | every conversation of every inbox of its tenant, with the full assignment |
 | Send a message | own conversation; lifecycle rules apply | any non-archived conversation of its tenant (an agent message into `RESOLVED` is 409); sending adds an `AGENT` participant row. Assignment routes work but does not gate sending. |
 | Lifecycle commands, `/assign` | none | all ([domain-model.md](domain-model.md) section 4) |
 | Typing, read cursor | own conversation | any conversation of its tenant |
@@ -82,8 +86,11 @@ Cross-tenant access is 403 at the API and at token issuance (D14).
 
 ## 4. 403 versus 404
 
-- 404 `NOT_FOUND`: no conversation (or inbox) with that id exists.
-- 403 `FORBIDDEN`: it exists but belongs to another tenant, another contact or another inbox of the contact's tenant.
+- 404 `NOT_FOUND`: no conversation (or inbox) with that id exists. For an inbox, existence is checked inside the
+  caller's tenant only: an agent of tenant A asking for `chat:inbox:<A>:<id of an inbox of tenant B>` gets 404, exactly
+  as for an unknown id, because the tenant-filtered lookup in A finds nothing (R-P18, R-P22; section 5).
+- 403 `FORBIDDEN`: it exists but belongs to another tenant, another contact or another inbox of the contact's tenant;
+  for inbox channels, the channel names a tenant other than the caller's (decided from the name, no lookup, R-P18).
 - Every data statement is tenant-filtered (D3), with two allowed shapes besides (R-P6 amended):
   - **one authorization probe**, `ConversationRepository.tenantAndInboxOf(UUID id)`, the only statement on a
     tenant-owned table without a tenant filter. It returns only `(tenantId, inboxId, contactId)`, never conversation
@@ -107,7 +114,7 @@ Tests: `ConversationApiIT.contactCannotReadAnotherInboxConversation`, `sameAgent
 | `chat:conversation:<id>` of another tenant | 403 | 403 |
 | `chat:inbox:<ownTenant>:<inboxOfOwnTenant>` | 403 | allowed |
 | `chat:inbox:<otherTenant>:<any inbox id>` (the channel names a tenant other than the caller's) | 403 | 403, from the channel name alone, no lookup (R-P18) |
-| `chat:inbox:<ownTenant>:<unknown id, or an inbox of another tenant>` | 403 | 404 from the tenant-filtered inbox lookup; an unknown id and another tenant's inbox answer alike, so no existence is confirmed (R-P18) |
+| `chat:inbox:<ownTenant>:<unknown id, or an inbox of another tenant>` | 403 | 404 from the tenant-filtered inbox lookup; an unknown id and another tenant's inbox answer alike, so no existence is confirmed (R-P18, R-P22) |
 | `chat:conversation:<id>` that does not exist | 404 (decided with the R-P6 probe) | 404 |
 | malformed (not exactly one of the two forms, uppercase UUID, extra segments) | 400 `VALIDATION_FAILED` | 400 |
 
@@ -138,7 +145,7 @@ case above), contract `subscriptionTokenForAnotherChannelIsRejected`, E2E `nonPa
 | Limit | Key | Default | Config | Error |
 |---|---|---|---|---|
 | Widget sessions | widget key + client IP | 10 per minute (the `local` profile sets 600 for the E2E and contract suites, overview §7 G) | `app.rate-limits.sessions-per-minute` (`APP_RATE_LIMIT_SESSIONS_PER_MINUTE`) | 429 `RATE_LIMITED` |
-| Messages | principal | 30 per minute | `app.rate-limits.messages-per-minute` (`APP_RATE_LIMIT_MESSAGES_PER_MINUTE`) | 429 |
+| Messages | `msg:<tenantId>:<principalType>:<principalId>`: the tenant and type keep the same agent id in two tenants apart (R-P31 M3) | 30 per minute | `app.rate-limits.messages-per-minute` (`APP_RATE_LIMIT_MESSAGES_PER_MINUTE`) | 429 |
 | Typing | principal + conversation | 1 per 2 s | `app.rate-limits.typing-interval` | 429 |
 
 `tenancy.RateLimiter` holds in-memory token buckets per backend instance (a `ponytail:` ceiling: with more than one
@@ -165,7 +172,7 @@ origins in `client.allowed_origins` (a static list). **Existing:** the widget bu
 | Leaking data in errors or logs | problem details with `code`, no stack, SQL, token or body; logs without bodies, tokens or secrets | `ConversationApiIT.validationErrorsAreProblemJsonWithCode`, `LogHygieneTest` |
 | Enumerating ids | random UUID v7; 403/404 rule (section 4) | |
 | Admin misuse | admin API absent unless local-dev; constant-time token check; startup guard in production | `AdminApiIT`, `OutboxAdminIT.adminRoutesAbsentWhenLocalDevDisabled`, `LocalDevGuardTest` |
-| A visitor sees internal routing details | for contact callers and in every `conversation.created` / `conversation.updated` payload (the conversation channel is shared with the visitor), `assignment` carries only `state` and `agentId`; `decisionId`, `reason` and `explanation` are absent (not null, R-P21) and reach agents only through `GET /api/v1/agent/conversations/{id}` (R-P3) | Plan 02 view test and Plan 04 projection-event tests (R-P3 amendments) |
+| A visitor sees internal routing details | for contact callers and in every `conversation.created` / `conversation.updated` payload (the conversation channel is shared with the visitor), `assignment` is the two-field `ContactAssignmentView {state, agentId}` with both keys always present (`agentId` null when none); `decisionId`, `reason` and `explanation` are absent and reach agents only through `GET /api/v1/agent/conversations/{id}` (R-P3, R-P29) | `ConversationApiIT.contactViewHidesAssignmentInternals` (Plan 02), Plan 04 projection-event tests, `EventEnvelopeContractTest` (Plan 03) |
 
 Isolation is enforced in application SQL and tests; the database adds no guard in the MVP (no row-level security, no
 composite `(tenant_id, id)` foreign keys, R10). A missed predicate is therefore caught only by tests until the ADR-0008

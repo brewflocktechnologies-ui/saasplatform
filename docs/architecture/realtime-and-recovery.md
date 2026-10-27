@@ -50,7 +50,7 @@ Centrifugo's own publication offset and epoch are never part of the application 
 | `eventType` | Channels | Durable (outbox) | `data` (R14) | Counter carried |
 |---|---|---|---|---|
 | `message.created` | conversation + inbox | yes | `{message: MessageView}` | `data.message.sequence` (R2) |
-| `conversation.created` | inbox | yes | `{conversation: ConversationView}` without `unreadCount` and `agentOnline`, and with `assignment` reduced to `state` and `agentId` (`decisionId`, `reason`, `explanation` absent, not null; R-P3, R-P21) | `data.conversation.version` (R3) |
+| `conversation.created` | inbox | yes | `{conversation: ConversationView}` without `unreadCount` and `agentOnline`, and with `assignment` = `ContactAssignmentView {state, agentId}`: both keys always present, `agentId` null when no agent holds it; `decisionId`, `reason`, `explanation` absent (R-P3, R-P29) | `data.conversation.version` (R3) |
 | `conversation.updated` | conversation + inbox | yes | `{conversation: …same reduced view…, change}` | `data.conversation.version` |
 | `typing` | conversation | no (direct publish) | `{participantType, participantId, typing}` | none |
 
@@ -70,6 +70,13 @@ shared with the visitor and those fields describe internal routing (R-P3). The d
 | `ASSIGNED` | assignment projection into `ASSIGNED` (worker or `/assign`) |
 | `ASSIGNMENT_QUEUED` | projection entering `QUEUED` |
 | `ASSIGNMENT_FAILED` | projection into `FAILED` |
+| `ASSIGNMENT_UPDATED` | every other projection write that changes `(assignment_state, assigned_agent_id)`: the release to `NONE` and projection moves into `REQUESTED`, `RELEASE_PENDING` or `REOPEN_PENDING` (worker or `/assign`; R-P23) |
+
+`version` increments if and only if a `conversation.created`/`conversation.updated` row is appended in the same
+transaction (purge excepted; R-P23, [domain-model.md](domain-model.md) section 5.4). A lifecycle transition that also
+moves the assignment (T1, T3, T5, T7, T8) appends one event with its lifecycle `change`, not a second
+`ASSIGNMENT_UPDATED`. A `QUEUED` poll that finds the record still `QUEUED` is bookkeeping: no event, no `version`
+change.
 
 Contracts: JSON Schemas in `libs/contracts/json-schema/chat/` (`event-envelope.v1`, `message.v1`,
 `message-created.v1`, `conversation.v1`, `conversation-created.v1`, `conversation-updated.v1`, `typing.v1`) and
@@ -89,18 +96,18 @@ the purge (D16), and Centrifugo history holds them for at most `history_ttl` (30
 
 | # | Step | Mechanism |
 |---|---|---|
-| 1 | **Claim** a bounded batch in its own short transaction, then commit | `UPDATE outbox_events SET locked_by = :worker, locked_until = :now + :lease, attempts = attempts + 1 WHERE event_id IN (SELECT event_id FROM outbox_events WHERE status = 'PENDING' AND next_attempt_at <= :now AND (locked_until IS NULL OR locked_until < :now) ORDER BY next_attempt_at, created_at LIMIT :batch FOR UPDATE SKIP LOCKED) RETURNING …` |
-| 2 | **Publish** each row outside any transaction | `RealtimePublisher.broadcast(channels, payload, idempotencyKey = eventId)` → `POST /api/broadcast` `{channels, data, idempotency_key}` with `X-API-Key`; 2 s timeout. Success needs HTTP 200, no top-level `error` and no `error` in any `result.responses[i]`; Centrifugo's 200-with-error is a failure (`OutboxPublisherIT.centrifugoErrorObjectIsAFailure`). |
+| 1 | **Claim** a bounded batch in its own short transaction, then commit | `WITH due AS MATERIALIZED (SELECT event_id FROM outbox_events WHERE status = 'PENDING' AND next_attempt_at <= :now AND (locked_until IS NULL OR locked_until < :now) ORDER BY next_attempt_at, created_at LIMIT :batch FOR UPDATE SKIP LOCKED) UPDATE outbox_events o SET locked_by = :worker, locked_until = :now + :lease, attempts = attempts + 1 FROM due WHERE o.event_id = due.event_id RETURNING …`; `MATERIALIZED` makes PostgreSQL evaluate the locked `LIMIT` subquery a single time (R-P31 M16) |
+| 2 | **Publish** each row outside any transaction, while the lease allows it | Per-row lease rule (R-P28): before each row's call the worker continues only if `now + 2 s` (the call timeout) ≤ the row's `locked_until`; otherwise it stops and leaves the rest of the batch, which is reclaimed after the lease (each keeps the attempt its claim counted, as after a crash). `RealtimePublisher.broadcast(channels, payload, idempotencyKey = eventId)` → `POST /api/broadcast` `{channels, data, idempotency_key}` with `X-API-Key`; 2 s timeout. Success needs HTTP 200, no top-level `error` and no `error` in any `result.responses[i]`; Centrifugo's 200-with-error is a failure (`OutboxPublisherIT.centrifugoErrorObjectIsAFailure`). A failure is a **transport failure** (connection refused, timeout, HTTP 5xx, or an error object with `temporary: true`) or a **non-transport failure** (any other error object, or HTTP 4xx) (R-P30). |
 | 3a | **Mark published** | `status = 'PUBLISHED'`, `published_at = now`, lock cleared, `WHERE event_id = :id AND locked_by = :worker` |
-| 3b | **Mark failed**: retry with backoff | `next_attempt_at = Backoff.next(now, attempts − 1, base, max, rng)`. `Backoff.next(now, n, base, max, rng) = now + min(base × 2^n ± 20 % jitter, max)` takes a 0-based retry index `n`, so the first retry waits about `base` (R-P15; jitter before the cap, overview §7 J); `last_error` = exception class name or HTTP status, never payload text; lock cleared; same `locked_by` guard |
-| 3c | **Park** after the retry budget | a failure with claimed `attempts >= max-attempts` sets `status = 'PARKED'`; parked rows are never dropped and never retried automatically |
+| 3b | **Mark failed**: retry with backoff | `next_attempt_at = Backoff.next(now, attempts − 1, base, max, rng)`. `Backoff.next(now, n, base, max, rng) = now + min(base × 2^n ± 20 % jitter, max)` takes a 0-based retry index `n`, so the first retry waits about `base` (R-P15; jitter before the cap, overview §7 J), and clamps `n` to [0, 30] before exponentiating, so the monotonic attempt counts of long-retried rows cannot overflow (R-P27); `last_error` = exception class name, HTTP status or Centrifugo error code, never payload text; lock cleared; same `locked_by` guard |
+| 3c | **Park** after the retry budget, for non-transport failures only | a **non-transport** failure with claimed `attempts >= max-attempts` sets `status = 'PARKED'`; a transport failure never parks: the row keeps retrying, its backoff capped at `max-backoff`, until Centrifugo answers, so an outage does not park a window of events (R-P30; `OutboxPublisherIT.transportFailuresNeverPark`). Parked rows are never dropped and never retried automatically |
 | 4 | **Recover crashed workers** | a row whose `locked_until` passed is claimable again; the crash used up one attempt. A mark by a worker that lost its lease updates 0 rows and is ignored (`OutboxPublisherIT.lostLeaseMarkIsIgnored`). |
 | 5 | **Replay** (operator) | `POST /api/v1/admin/outbox/{eventId}/replay`: `PARKED` → `PENDING`, `attempts = 0`, `next_attempt_at = now`; logged at INFO with `eventId` (R16). `GET /api/v1/admin/outbox?status=&limit=` lists rows. Local-dev only, `X-Admin-Token`. |
 
 Configuration (overview §5): `app.outbox.enabled=true` (gates only the scheduled tick), `poll-delay=500ms`,
-`batch-size=100`, `lease=30s`, `max-attempts=10`, `base-backoff=1s`, `max-backoff=60s`. With these values a
-continuously failing row parks about 4 minutes after its first attempt ([system-overview.md](system-overview.md)
-section 4).
+`batch-size=100`, `lease=30s`, `max-attempts=10`, `base-backoff=1s`, `max-backoff=60s`. With these values a row that
+Centrifugo keeps rejecting (non-transport failures) parks about 4 minutes after its first attempt; during a Centrifugo
+outage rows retry every 60 s at most and never park (R-P30; [system-overview.md](system-overview.md) section 4).
 
 Observability (master spec 9.2 step 7, 15): gauges `outbox.pending.count`, `outbox.parked.count`,
 `outbox.pending.oldest_age_seconds`; counter `outbox.publish.attempts{outcome=success|failure|parked}`; timer
@@ -110,7 +117,8 @@ carries `eventId`, `eventType`, `attempts` and the row's `trace_id` (from the AP
 Where duplicates come from, so clients must expect them:
 - a worker publishes and dies before step 3a: the next claim republishes the same `eventId`
   (`OutboxPublisherIT.workerCrashAfterPublishBeforeMarkRepublishes`);
-- a lease expires during a slow publish and a second worker republishes;
+- a lease expires during a slow publish and a second worker republishes (the per-row lease rule of step 2 makes this
+  rare, not impossible: a mark can still land after the lease, and instance clocks can differ; R-P28);
 - Centrifugo recovery replays events the client also fetches through the API;
 - an agent subscribed to both channels receives each `message.created` and `conversation.updated` once per channel.
 
@@ -233,7 +241,7 @@ not copied from Zulip: its per-client event queues, long polling, Tornado, serve
 | SI-4 | (a) Delta catch-up when continuity can be restored; (b) full reload of the newest page when it cannot be proven; never rebuild from client memory. | (b) trigger "recovery failed" = `wasRecovering && !recovered` (R4); (a) capped at 5 pages, then (b) (R5) | `sync.ts` reconcile | `sync.spec.ts: failedRecoveryTriggersCatchUp`, `catchUpPagesWhileHasMore`, `emptyStartLoadsNewestPageOnly`; E2E `centrifugoRestartConverges`, `refreshDuringActiveConversation` |
 | SI-5 | Durable events carry a stable `eventId`; message events carry `sequence`, conversation events `version`; applying twice equals applying once. | "every event carries sequence" → message events only (R2, R3) | outbox `event_id`; `sync.ts` | `sync.spec.ts: ignoresDuplicateEventIds`; `OutboxPublisherIT.workerCrashAfterPublishBeforeMarkRepublishes`; widget `liveEventBeforeSendResponseRendersOnce` |
 | SI-6 | Advance `lastContiguous` only after a successful apply; a failed apply triggers a full reload. | as written | `sync.ts` | none named in Plan 06 (gap, see feature spec section 8) |
-| SI-7 | An event is published if and only if its transaction committed, and a committed event is eventually published or parked for replay. | "eventually" bounded by parking (section 4) | outbox appender and publisher | `MessageWriteIT.rollbackLeavesNoPartialState`; `OutboxPublisherIT.centrifugoRestartDrainsBacklog`, `workerCrashAfterClaimIsRecoveredAfterLease`, `workerCrashAfterPublishBeforeMarkRepublishes`, `poisonEventIsParkedAfterMaxAttempts` |
+| SI-7 | An event is published if and only if its transaction committed, and a committed event is eventually published or parked for replay. | "eventually" bounded by parking (section 4) | outbox appender and publisher | `MessageWriteIT.rollbackLeavesNoPartialState`; `OutboxPublisherIT.centrifugoRestartDrainsBacklog`, `workerCrashAfterClaimIsRecoveredAfterLease`, `workerCrashAfterPublishBeforeMarkRepublishes`, `poisonEventIsParkedAfterMaxAttempts`, `transportFailuresNeverPark` |
 | SI-8 | Events buffered during a history fetch are applied after it when contiguous from the head; a gap falls back to SI-3. | as written | `sync.ts` | `sync.spec.ts: eventDuringInitialLoadIsAppliedOnce` |
 | SI-9 | A bad cursor never changes or discards server data: `after` beyond the head returns an empty page; the read cursor is monotonic and clamped; an API head below `lastContiguous` makes the client reload. | the head comes from `ConversationView.lastSequence` (no head in `MessagePage`), and `PUT …/read` answers 204 (overview §5) | `HistoryService`, `ReadCursorService`, `sync.ts` | `HistoryIT.pagingBeyondRangeAndOversizedLimitAreBounded`; `ReadCursorIT.advanceIsMonotonic`, `cursorCannotExceedLastSequence`; client side: none named (gap) |
 | SI-10 | Durable and ephemeral events are separate classes; losing typing changes nothing. | as written | `TypingService`; `typing.ts` | `TypingIT.typingIsRateLimitedAndNeverPersisted`, `centrifugoDownStillReturns202`; `typing.spec.ts: receiverClearsAfterTimeout`; E2E `typingIndicatorTimesOutWhenStopIsLost` |

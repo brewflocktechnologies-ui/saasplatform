@@ -37,7 +37,9 @@ Identity:
 
 Option 1 with identity (a) (overview D3, D7, D14; rulings R6, R10):
 
-- Session JWT claims `sub`, `tenant`, `typ`, `inbox` (contacts), `iat`, `exp`; TTL 24 h for contacts, 12 h for agents;
+- Session JWT claims `sub`, `tenant`, `typ`, `inbox` (contacts), `iat`, `exp`, and for contacts `auth_time` (the first
+  issue time, copied on refresh; a contact token is refreshable for 30 days after it, R-P31 M4); TTL 24 h for contacts,
+  12 h for agents;
   secret `APP_SESSION_TOKEN_HMAC_SECRET_KEY`, distinct from the Centrifugo secrets. Visitors get a token from
   `POST /api/v1/widget/sessions` (public `widgetKey` → inbox → contact); agents from `POST /api/v1/agent/local-login`
   (local-dev only).
@@ -66,8 +68,8 @@ Option 1 with identity (a) (overview D3, D7, D14; rulings R6, R10):
 - The 403-versus-404 rule needs the one authorization probe `tenantAndInboxOf(id)`, which returns only the tenant,
   inbox and contact ids and never conversation data; it confirms to another tenant that an id exists, which is
   acceptable for UUID v7 ids that cannot be enumerated (R-P6).
-- Contact-facing views and conversation events carry only the assignment's `state` and `agentId` (R-P3); routing
-  details stay on the agent API.
+- Contact-facing views and conversation events carry only the assignment's `state` and `agentId`, as the two-field
+  `ContactAssignmentView` with both keys always present (R-P3, R-P29); routing details stay on the agent API.
 - Visitor identity is weak by design: anyone can claim an `externalId` and resume that visitor's conversation. This is
   acceptable only locally.
 - Changing a session secret ends every session (no key ids, no rotation).

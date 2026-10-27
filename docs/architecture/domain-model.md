@@ -23,7 +23,7 @@ V3 adds new tables and leaves V2 untouched; V2 is dropped by a later migration o
 | 9 | Assignment | projection columns on `conversations` | n/a | The allocation service owns assignment records, history, availability and capacity (D8). The platform stores only `assignment_state`, `assigned_agent_id`, `assignment_decision_id`, `assignment_reason`, `assignment_explanation` plus worker bookkeeping. No `conversation_assignment_history` table (master spec 8.2 condition: the allocation service already owns it). | MVP (projection) | `conversation` |
 | 10 | ReadCursor | `conversation_read_cursors` | `(conversation_id, participant_type, participant_id)` | One row per participant, not per message. Monotonic and at most `last_sequence` (R12). | MVP | `conversation` |
 | 11 | OutboxEvent | `outbox_events` | `event_id uuid` | One row per durable domain event, written in the transaction of the change (D6). `event_id` is the envelope `eventId`. | MVP | `outbox` |
-| 12 | AuditEvent | `conversation_state_events` (+ `purge_runs`) | `id uuid` | Append-only record of lifecycle and assignment changes with actor (R16). `details` never contains message bodies. Survives purge (D16). Authentication and session audit: NEXT. | MVP | `conversation` |
+| 12 | AuditEvent | `conversation_state_events` (+ `purge_runs`) | `id uuid` | Append-only record of lifecycle and assignment changes with actor (R16). `details` never contains message bodies. Survives purge (D16); the purge removes only the free-text `reason` from `details` (R-P31 M10). Authentication and session audit: NEXT. | MVP | `conversation` |
 | 13 | Retention policy | `retention_policies` | `tenant_id` | `resolved_retention_days > 0`; `legal_hold` stops every purge for the tenant (D16). | MVP | `retention` |
 | 14 | Purge run | `purge_runs` | `id uuid` | One row per run, dry runs included, with counts and status. | MVP | `retention` |
 
@@ -51,9 +51,9 @@ Optional entities (master spec 5.1, last paragraph):
 | Capacity | counted by the allocation service from its active assignments | allocation service | anything the platform computes (it never does) |
 | Message persistence | a committed `messages` row: committed means accepted | send transaction | realtime delivery |
 | Realtime delivery | `outbox_events.status` (`PENDING`, `PUBLISHED`, `PARKED`) | `OutboxPublisher` | receipt by a browser: `PUBLISHED` only means Centrifugo accepted it |
-| Read / unread | `conversation_read_cursors.last_read_sequence`; unread = `last_sequence − cursor` (D13) | `PUT …/read`, sender's own send (R12) | delivery receipts (none in the MVP) |
+| Read / unread | `conversation_read_cursors.last_read_sequence`; unread = `last_sequence − cursor` (D13), and 0 once the conversation is purged (R-P31 M5) | `PUT …/read`, sender's own send (R12) | delivery receipts (none in the MVP) |
 | Message visibility / deletion | `deleted_at` (reserved, NEXT); purge removes rows | nothing in the MVP; purge | archive |
-| Purge | `conversations.purged_at` | `RetentionService` | archive (purge also archives; archive never purges) |
+| Purge | `conversations.purged_at`, exposed as the nullable `ConversationView.purgedAt` (R-P31 M5) | `RetentionService` | archive (purge also archives; archive never purges) |
 
 Examples the model must allow (master spec 5.2): an `OPEN` conversation with `assignment_state = QUEUED`; an agent
 connected but `AWAY`; a message committed while its outbox row is still `PENDING` because Centrifugo is down; a
@@ -70,7 +70,7 @@ Times are `timestamptz`.
 | `inboxes` | `id uuid`, `tenant_id` → `tenants`, `name`, `widget_key text`, `allocation_queue_id text`, `created_at` | PK `id`; `widget_key` UNIQUE | |
 | `contacts` | `id uuid`, `tenant_id` → `tenants`, `external_id text null`, `display_name text null`, `created_at` | PK `id`; UNIQUE `(tenant_id, external_id) WHERE external_id IS NOT NULL` | |
 | `agents` | `tenant_id` → `tenants`, `id text`, `display_name`, `created_at` | PK `(tenant_id, id)` | |
-| `conversations` | `id uuid`, `tenant_id`, `inbox_id` → `inboxes`, `contact_id` → `contacts`, `status` default `'OPEN'`, `version bigint` default 0, `last_sequence bigint` default 0, `last_message_at null`, `last_message_preview text null`, `assignment_state` default `'NONE'`, `assigned_agent_id text null`, `assignment_decision_id uuid null`, `assignment_reason text null`, `assignment_explanation text null`, `assignment_attempts int` default 0 (monotonic, feeds the idempotency key), `assignment_setup_failures int` default 0 (consecutive setup errors, R-P2), `assignment_next_attempt_at null`, `resolved_at null`, `archived_at null`, `archived_by text null`, `archive_reason text null`, `purged_at null`, `created_at`, `updated_at` | PK `id`; `status IN ('OPEN','PENDING','RESOLVED')`; `assignment_state IN ('NONE','REQUESTED','QUEUED','ASSIGNED','RELEASE_PENDING','REOPEN_PENDING','FAILED')`; partial UNIQUE `ux_conversations_active_per_contact (tenant_id, inbox_id, contact_id) WHERE status <> 'RESOLVED' AND archived_at IS NULL` (D11) | `ix_conversations_inbox_activity (tenant_id, inbox_id, archived_at, status, coalesce(last_message_at, created_at) DESC, id DESC)`; `ix_conversations_agent_activity (tenant_id, assigned_agent_id, archived_at, status, coalesce(last_message_at, created_at) DESC, id DESC)`; partial `ix_conversations_assignment_due (assignment_next_attempt_at) WHERE assignment_state IN ('REQUESTED','QUEUED','FAILED','RELEASE_PENDING','REOPEN_PENDING')` (`FAILED` rows are re-read every `failed-poll`, R-P17); partial `ix_conversations_purge_due (tenant_id, resolved_at, id) WHERE status = 'RESOLVED' AND purged_at IS NULL` |
+| `conversations` | `id uuid`, `tenant_id`, `inbox_id` → `inboxes`, `contact_id` → `contacts`, `status` default `'OPEN'`, `version bigint` default 0, `last_sequence bigint` default 0, `last_message_at null`, `last_message_preview text null`, `assignment_state` default `'NONE'`, `assigned_agent_id text null`, `assignment_decision_id uuid null`, `assignment_reason text null`, `assignment_explanation text null`, `assignment_attempts int` default 0 (monotonic, feeds the idempotency key), `assignment_setup_failures int` default 0 (consecutive setup errors, R-P2), `assignment_next_attempt_at null`, `resolved_at null`, `archived_at null`, `archived_by text null`, `archive_reason text null`, `purged_at null`, `created_at`, `updated_at` | PK `id`; `status IN ('OPEN','PENDING','RESOLVED')`; `assignment_state IN ('NONE','REQUESTED','QUEUED','ASSIGNED','RELEASE_PENDING','REOPEN_PENDING','FAILED')`; partial UNIQUE `ux_conversations_active_per_contact (tenant_id, inbox_id, contact_id) WHERE status <> 'RESOLVED' AND archived_at IS NULL` (D11) | `ix_conversations_inbox_activity (tenant_id, inbox_id, archived_at, status, coalesce(last_message_at, created_at) DESC, id DESC)`; `ix_conversations_agent_activity (tenant_id, assigned_agent_id, archived_at, status, coalesce(last_message_at, created_at) DESC, id DESC)`; partial `ix_conversations_assignment_due (assignment_next_attempt_at) WHERE assignment_state IN ('REQUESTED','QUEUED','FAILED','RELEASE_PENDING','REOPEN_PENDING')` (`FAILED` rows are re-read every `failed-poll`, R-P17); partial `ix_conversations_purge_due (tenant_id, id) WHERE purged_at IS NULL AND (status = 'RESOLVED' OR archived_at IS NOT NULL)`, covering both branches of the purge eligibility rule (R-P25; [archive-retention-purge.md](archive-retention-purge.md) section 2) |
 | `conversation_participants` | `conversation_id` → `conversations`, `tenant_id`, `participant_type`, `participant_id text`, `joined_at` | PK `(conversation_id, participant_type, participant_id)`; `participant_type IN ('CONTACT','AGENT','BOT','SYSTEM')` | |
 | `messages` | `id uuid`, `tenant_id`, `conversation_id` → `conversations`, `sequence bigint`, `sender_type`, `sender_id text`, `message_type` default `'TEXT'`, `body text`, `client_message_id text null`, `request_fingerprint text null`, `reply_to_message_id uuid null` → `messages`, `metadata jsonb null`, `created_at` default `clock_timestamp()`, `edited_at null`, `deleted_at null`, `deleted_by text null`, `deletion_reason text null` | PK `id`; UNIQUE `(tenant_id, conversation_id, sequence)`; partial UNIQUE `(conversation_id, sender_type, sender_id, client_message_id) WHERE client_message_id IS NOT NULL`; `sender_type IN ('CONTACT','AGENT','BOT','SYSTEM')`; `message_type IN ('TEXT')`; `length(btrim(body)) > 0 AND char_length(body) <= 4000`; `client_message_id IS NULL OR char_length(client_message_id) BETWEEN 1 AND 64` | the two unique indexes (history pages use the first) |
 | `message_attachments` | `id uuid`, `tenant_id`, `message_id` → `messages` ON DELETE CASCADE, `file_name`, `content_type`, `size_bytes bigint`, `storage_key text`, `status`, `created_at` | PK `id`; `status IN ('PENDING','READY','DELETED')` | |
@@ -82,7 +82,9 @@ Times are `timestamptz`.
 
 Notes:
 - `conversation_state_events.from_status` and `to_status` hold the lifecycle status before and after the change; they
-  are equal for archive, unarchive and assignment events.
+  are equal for archive, unarchive and assignment events. `details` holds the command's free-text `reason` (removed by
+  the purge, R-P31 M10) and, for a `RESOLVED` event, `lastSequence` = the conversation's `last_sequence` at the resolve,
+  so race tests compare a message with the resolve by `sequence`, not by timestamps (R-P31 M7).
 - Conversation-scoped outbox rows use `aggregate_type = 'conversation'` and `aggregate_id = <conversation id>`, including
   `message.created`; the purge deletes by that pair (Plan 02 T3, Plan 05 T1).
 - No composite `(tenant_id, id)` foreign keys and no row-level security in the MVP (R10).
@@ -112,8 +114,11 @@ For lifecycle commands, under the conversation row lock (R13):
 
 1. **Already satisfied → 200 no-op**, even when `expectedVersion` is stale (safe client retries). No write, no version
    change, no state event, no outbox row. "Satisfied" means the command's target already holds: status `RESOLVED` for
-   `RESOLVE`, `OPEN` for `REOPEN`, `PENDING` for `MARK_PENDING`, archived for `ARCHIVE`, not archived for `UNARCHIVE`. This holds on an archived conversation too
-   (R-P8).
+   `RESOLVE`, `OPEN` for `REOPEN`, `PENDING` for `MARK_PENDING`, archived for `ARCHIVE`, not archived for `UNARCHIVE`. On an
+   archived conversation only `RESOLVE` (status `RESOLVED`) and `ARCHIVE` are satisfied no-ops (R-P8); `REOPEN` of an
+   archived `OPEN` and `MARK_PENDING` of an archived `PENDING` conversation are not no-ops but 409
+   `CONVERSATION_ARCHIVED` at step 3, because an archived conversation accepts no status command (R-P31 M14, amending
+   R-P8).
 2. **`expectedVersion` present and different from `version` → 409 `STALE_VERSION`.** Two agents sending conflicting
    commands with the same version get one 200 and one `STALE_VERSION` (Plan 07 `PlatformRaceIT.conflictingAgentCommandsWithVersion`).
 3. **Transition table** (section 5.2) → apply, or 409 with the table's code. An archived conversation rejects every
@@ -150,14 +155,15 @@ from these two tables.
 | Command | `OPEN` | `PENDING` | `RESOLVED` |
 |---|---|---|---|
 | `RESOLVE` | 409 `CONVERSATION_ARCHIVED` | 409 `CONVERSATION_ARCHIVED` | 200 no-op |
-| `REOPEN` | 200 no-op | 409 `CONVERSATION_ARCHIVED` | 409 `CONVERSATION_ARCHIVED` |
-| `MARK_PENDING` | 409 `CONVERSATION_ARCHIVED` | 200 no-op | 409 `CONVERSATION_ARCHIVED` |
+| `REOPEN` | 409 `CONVERSATION_ARCHIVED` (R-P31 M14) | 409 `CONVERSATION_ARCHIVED` | 409 `CONVERSATION_ARCHIVED` |
+| `MARK_PENDING` | 409 `CONVERSATION_ARCHIVED` | 409 `CONVERSATION_ARCHIVED` (R-P31 M14) | 409 `CONVERSATION_ARCHIVED` |
 | `ARCHIVE` | 200 no-op | 200 no-op | 200 no-op |
 | `UNARCHIVE` | unarchived, stays `OPEN` [T8], or 409 `CONVERSATION_ACTIVE_EXISTS` | unarchived, stays `PENDING` [T8], or 409 `CONVERSATION_ACTIVE_EXISTS` | unarchived, stays `RESOLVED` [T8]; 409 `INVALID_TRANSITION` when `purged_at` is set |
 | `CONTACT_MESSAGE` | 409 `CONVERSATION_ARCHIVED` | 409 `CONVERSATION_ARCHIVED` | 409 `CONVERSATION_ARCHIVED` |
 | `AGENT_MESSAGE` | 409 `CONVERSATION_ARCHIVED` | 409 `CONVERSATION_ARCHIVED` | 409 `CONVERSATION_ARCHIVED` |
 
-A purged conversation is always `RESOLVED` and archived (D16): a reopen or message is `CONVERSATION_ARCHIVED`, and an
+A purged conversation is always `RESOLVED` and archived (D16; the purge also sets `RESOLVED` on an archived conversation
+that was not, R-P25): a reopen or message is `CONVERSATION_ARCHIVED`, and an
 unarchive is `INVALID_TRANSITION`, so no message can ever be written into a purged conversation (Plan 07
 `Invariants.assertAll`: "no `purged_at` conversation with messages"). `ConversationLifecycle.apply(status, archived,
 command)` has no purge input; `ConversationService` checks `purged_at` for `UNARCHIVE` after step 2 of section 5.1
@@ -167,11 +173,12 @@ command)` has no purge input; `ConversationService` checks `purged_at` for `UNAR
 
 Every transition increments `version`, sets `updated_at`, writes one state event with the actor and one outbox
 `conversation.updated` row (channels: the conversation channel and the inbox channel; [realtime-and-recovery.md](realtime-and-recovery.md)
-section 3).
+section 3). When the transition also changes `assignment_state` (last column), that one event covers both changes: no
+second `conversation.updated` and no second `version` increment (R-P23).
 
 | Id | Transition | Other column writes | State event `event_type` | `data.change` | `assignment_state` effect |
 |---|---|---|---|---|---|
-| T1 | `RESOLVE`: `OPEN`/`PENDING` → `RESOLVED` | `resolved_at = now` | `RESOLVED` | `RESOLVED` | `REQUESTED`, `QUEUED`, `ASSIGNED`, `REOPEN_PENDING`, `FAILED` → `RELEASE_PENDING` (a `FAILED` row must not hold engine capacity silently, R-P17); `NONE`, `RELEASE_PENDING` unchanged |
+| T1 | `RESOLVE`: `OPEN`/`PENDING` → `RESOLVED` | `resolved_at = now` | `RESOLVED`, `details.lastSequence` = `last_sequence` (R-P31 M7) | `RESOLVED` | `REQUESTED`, `QUEUED`, `ASSIGNED`, `REOPEN_PENDING`, `FAILED` → `RELEASE_PENDING` (a `FAILED` row must not hold engine capacity silently, R-P17); `NONE`, `RELEASE_PENDING` unchanged |
 | T2 | `REOPEN`: `PENDING` → `OPEN` | none | `REOPENED` | `REOPENED` | unchanged |
 | T3 | `REOPEN`: `RESOLVED` → `OPEN` | `resolved_at` keeps the last resolution time, overwritten by the next resolve (R-P8) | `REOPENED` | `REOPENED` | → `REOPEN_PENDING` |
 | T4 | `MARK_PENDING`: `OPEN` → `PENDING` | none | `PENDING` | `PENDING` | unchanged |
@@ -190,13 +197,17 @@ carries an `assignment_state` precondition (R-P20).
 
 ### 5.4 `version`
 
-`version` starts at 0 and increments (`version = version + 1` in the same `UPDATE`) on every write that changes the
-conversation's status, archive marker, purge marker or assignment projection (R-P9); the purge `UPDATE` therefore adds
-`version = version + 1`. It does not change for message activity (`last_sequence`, `last_message_at`,
-`last_message_preview`), which `sequence` orders (R2), nor for worker bookkeeping (claims, `assignment_attempts`,
-`assignment_setup_failures`, `assignment_next_attempt_at`), so message activity never makes an agent's
-`expectedVersion` stale. Not every increment emits an event (the release to `NONE` and the purge emit no realtime
-event), so a client that sees a `version` jump greater than 1 refetches the conversation (R3).
+`version` starts at 0 (`conversation.created` carries 0) and increments (`version = version + 1` in the same `UPDATE`)
+**if and only if** the same transaction appends a `conversation.updated` outbox row (R-P23): on every write that changes
+the conversation's status or archive marker, and on every projection write that changes `(assignment_state,
+assigned_agent_id)` (R-P9, R-P23). The one exception is the purge, whose `UPDATE` adds `version = version + 1` and
+emits no realtime event (R-P9, R-P25). `version` does not change for message activity (`last_sequence`,
+`last_message_at`, `last_message_preview`), which `sequence` orders (R2), nor for worker bookkeeping (claims,
+`assignment_attempts`, `assignment_setup_failures`, `assignment_next_attempt_at`, and a projection that leaves
+`(assignment_state, assigned_agent_id)` unchanged, such as a `QUEUED` poll that finds the record still `QUEUED` and only
+updates the stored reason), so neither message activity nor a silent worker move makes an agent's `expectedVersion`
+stale. Because every other increment comes with exactly one event, a client that sees a `version` jump greater than 1
+has missed an event (or the conversation was purged) and refetches the conversation (R3).
 
 ## 6. Assignment state machine (D8)
 
@@ -214,8 +225,11 @@ section 3.
 | `REOPEN_PENDING` | the conversation was reopened or unarchived; the allocation record must be requeued or kept | T3, T7, T8 | `REQUESTED`, `QUEUED`, `ASSIGNED`, `FAILED`; `RELEASE_PENDING` (T1, T5) | yes |
 | `FAILED` | the request cannot proceed without a person: a rejection, a configuration fault, or 30 consecutive setup errors (`assignment_setup_failures`, R-P2) | worker outcomes ([allocation-integration.md](allocation-integration.md) section 3); `/assign` projecting a `CANCELLED` engine record or a `FAILED_INTERNAL`, `SKIPPED_POLICY_DISABLED` or `NO_WAITING_CONVERSATION` outcome ([allocation-integration.md](allocation-integration.md) section 5) | `ASSIGNED` (the periodic check finds the engine record assigned: reason `ALLOCATION_SWEEP`, R-P17); `/assign` (any mode) → its outcome; `REOPEN_PENDING` (T3, T7, T8); `RELEASE_PENDING` on resolve and archive (T1, T5, R-P17) | yes, unless archived, every `app.assignment.failed-poll` (60 s) for a `findConversation`-only check that never dispatches (R-P17); listed in `view=queue` so an agent can retry |
 
-Rules: every projection write has an `assignment_state` precondition and increments `version`; 0 rows means the row
+Rules: every projection write has an `assignment_state` precondition and, when it changes `(assignment_state,
+assigned_agent_id)`, increments `version` and appends exactly one `conversation.updated` (R-P23); 0 rows means the row
 moved on (for example, resolved while the worker was calling the allocation service) and the result is dropped (R13).
+The worker's bookkeeping writes (`reschedule`, `recordSetupFailure`, `resetSetupFailures`) carry the same
+`assignment_state` precondition (R-P31 M15).
 The worker claims `REQUESTED`, `QUEUED` and `FAILED` rows only when they are not archived, and never dispatches an
 archived row; only `REQUESTED` rows dispatch, `QUEUED` rows are re-read with `findConversation` every `queued-poll` (5 s)
 and `FAILED` rows every `failed-poll` (60 s) (R-P1, R-P17); `RELEASE_PENDING` and `REOPEN_PENDING` rows are always
@@ -224,16 +238,18 @@ claimable (R-P13). A row entering `FAILED`, and each re-read that leaves it `FAI
 and is reset to 0 by any successful allocation response; `assignment_attempts` only grows because it feeds the
 idempotency key (R-P2).
 Projection writes also upsert the `AGENT` participant on assignment and append `conversation.updated` with `change`
-`ASSIGNED`, `ASSIGNMENT_QUEUED` (on entering `QUEUED` only) or `ASSIGNMENT_FAILED`; moves into `REQUESTED`,
-`RELEASE_PENDING` and `NONE` emit no event. State events: `ASSIGNED`, `ASSIGNMENT_QUEUED`, `ASSIGNMENT_FAILED`,
-`RELEASED`.
+`ASSIGNED`, `ASSIGNMENT_QUEUED` (on entering `QUEUED`) or `ASSIGNMENT_FAILED`, and `ASSIGNMENT_UPDATED` for every other
+projection change: the release to `NONE` and projection moves into `REQUESTED`, `RELEASE_PENDING` or `REOPEN_PENDING`
+(R-P23). The lifecycle transitions T1, T3, T5, T7 and T8 move the assignment under their own lifecycle event (section
+5.3). State events: `ASSIGNED`, `ASSIGNMENT_QUEUED`, `ASSIGNMENT_FAILED`, `RELEASED`.
 
-Visibility (R-P3): `AssignmentView` carries `state`, `agentId`, `decisionId`, `reason` and `explanation` only for agent
-callers (`GET /api/v1/agent/…`). For contact callers and in every `conversation.created` / `conversation.updated` event
-payload, `assignment` carries only `state` and `agentId`; `decisionId`, `reason` and `explanation` are absent (not
-null: `AssignmentView` is serialised without null fields for contacts, R-P21), because the conversation channel is shared
-with the visitor and allocation explanations describe internal routing. Agent responses keep the five fields (null when
-unknown).
+Visibility (R-P3, R-P29): `AssignmentView` carries `state`, `agentId`, `decisionId`, `reason` and `explanation` only for
+agent callers (`GET /api/v1/agent/…`; null when unknown). For contact callers and in every `conversation.created` /
+`conversation.updated` event payload, `assignment` is the dedicated two-field record `ContactAssignmentView(state,
+agentId)`: both keys are always present (`agentId` null when no agent holds the conversation), and `decisionId`,
+`reason` and `explanation` do not exist in it, because the conversation channel is shared with the visitor and
+allocation explanations describe internal routing. R-P29 supersedes R-P21's serialisation detail (no `AssignmentView`
+with null fields dropped).
 
 ## 7. Identifiers and time
 
