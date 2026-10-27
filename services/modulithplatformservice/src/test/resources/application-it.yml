@@ -1,0 +1,12 @@
+# Integration-test profile: real PostgreSQL (Testcontainers), local-dev routes enabled, background workers off.
+# LOCAL POC — NOT REAL AUTHENTICATION: the local login and admin token are test fixtures, not production identity.
+app:
+  local-dev:
+    enabled: true
+    admin-token: test-admin-token
+  seed:
+    enabled: false
+  assignment:
+    enabled: false
+  outbox:
+    enabled: false

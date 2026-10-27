@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
@@ -26,6 +27,7 @@ import tools.jackson.databind.json.JsonMapper;
  */
 @SpringBootTest
 @AutoConfigureMockMvc
+@ActiveProfiles("it")
 @Testcontainers(disabledWithoutDocker = true)
 public abstract class PlatformIntegrationTest {
 
@@ -68,11 +70,6 @@ public abstract class PlatformIntegrationTest {
 		registry.add("spring.datasource.password", POSTGRES::getPassword);
 		registry.add("app.centrifugo.url", CENTRIFUGO::url);
 		registry.add("app.sessions.secret", () -> SESSION_SECRET);
-		registry.add("app.local-dev.enabled", () -> "true");
-		registry.add("app.local-dev.admin-token", () -> ADMIN_TOKEN);
-		registry.add("app.seed.enabled", () -> "false");
-		registry.add("app.assignment.enabled", () -> "false");
-		registry.add("app.outbox.enabled", () -> "false");
 	}
 
 	/**

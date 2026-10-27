@@ -1,5 +1,6 @@
 package com.byteflock.chatplatform.health;
 
+import com.byteflock.chatplatform.tenancy.SessionTokens;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -17,6 +18,10 @@ class StatusControllerTests {
 
 	@MockitoBean
 	DependencyChecks checks;
+
+	/** The tenancy web configuration is part of every MVC slice; its interceptor only needs the token verifier. */
+	@MockitoBean
+	SessionTokens sessionTokens;
 
 	@Test
 	void reportsUpWhenAllDependenciesAreUp() {
