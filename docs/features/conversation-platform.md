@@ -133,3 +133,29 @@ concurrency, history, read-cursor, lifecycle, tenancy and API integration tests 
 New settings live in `.env.example`: `APP_SESSION_TOKEN_HMAC_SECRET_KEY` (`__generate__`), `APP_LOCAL_ADMIN_TOKEN`
 (`__generate__`), `APP_LOCAL_DEV_ENABLED`, `APP_SEED_WIDGET_KEY`. The backend fails fast if the session secret is missing
 or shorter than 32 characters, and refuses to start when `app.local-dev.enabled=true` in a production environment.
+
+## 7. Assignment and presence (Plan 04)
+
+`POST /api/v1/agent/conversations/{id}/assign` requires an `Idempotency-Key` header (1–128 characters) and a body
+`{"mode":"CLAIM|AUTO|REASSIGN","expectedVersion":<optional>}`. It creates the allocation record first when needed, calls
+the allocation service outside any transaction and projects the outcome: `ASSIGNED` (200), `QUEUED_*` (200 with
+`assignment.state=QUEUED`), a rejection (409 `ALLOCATION_REJECTED` with the engine code in `detail`) or an unavailable
+engine (503 `ALLOCATION_UNAVAILABLE`). A repeated claim by the agent who already holds the conversation answers 200 with
+the unchanged view; a different agent gets 409. Archiving that conversation releases the capacity (`RELEASE_PENDING`),
+reopening or unarchiving requests a new assignment (`REOPEN_PENDING`).
+
+Presence lives in the allocation service: the dashboard sends `PUT /api/v1/agent/presence {"availability":"ONLINE"}`
+every 30 s (the engine stamps its own heartbeat) and reads `GET /api/v1/agent/me`. Visitors see `agentOnline` on their
+conversation: `true` only when the assigned agent is enabled, `ONLINE` and fresh within `app.presence.stale-after`
+(60 s), `null` when the allocation service cannot be reached. Assignment routes work, it does not gate sending.
+
+The allocation stack runs with `docker compose up -d --wait allocation-postgres allocation-service` (host port 8081);
+the backend seeds tenant `tenant-local`, queue `support`, agent `agentbob` and policy `local-round-robin` on startup.
+
+```bash
+AGENT=http://localhost:8080/api/v1/agent
+curl -s -X PUT $AGENT/presence -H "Authorization: Bearer $AGENT_TOKEN" \
+  -H 'Content-Type: application/json' -d '{"availability":"ONLINE"}'
+curl -s -X POST $AGENT/conversations/<id>/assign -H "Authorization: Bearer $AGENT_TOKEN" \
+  -H 'Idempotency-Key: claim-1' -H 'Content-Type: application/json' -d '{"mode":"CLAIM"}'
+```

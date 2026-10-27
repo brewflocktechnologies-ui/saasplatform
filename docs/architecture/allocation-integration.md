@@ -1,5 +1,7 @@
 # Conversation platform: allocation service integration
 
+**Implementation status (Plan 04):** AllocationClient, AllocationSeeder, AssignmentWorker/AssignmentOrchestrator, the assignment projection, /assign and presence are implemented and covered by AllocationClientTest, AllocationSeederTest, AssignmentOrchestrationIT, AssignmentApiIT and PresenceIT. The allocation container/Compose topology is configured; the image build and the live contract test (AllocationClientLiveIT) were not run in this session.
+
 Design document (master spec 11.1, 11.4, 13). Plan 04 implements it: the `assignment` module holds
 `AllocationClient` and `AllocationSeeder`; the `conversation` module holds `AssignmentWorker`, `AssignmentOrchestrator`,
 the projection, `/assign` and the presence endpoints (D2); Compose gains the engine. Conventions (Existing, `D<n>`,
