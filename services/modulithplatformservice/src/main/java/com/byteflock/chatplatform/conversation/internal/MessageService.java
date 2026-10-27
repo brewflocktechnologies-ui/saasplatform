@@ -13,6 +13,7 @@ import com.byteflock.chatplatform.conversation.MessageView;
 import com.byteflock.chatplatform.conversation.SendMessageRequest;
 import com.byteflock.chatplatform.outbox.OutboxAppender;
 import com.byteflock.chatplatform.tenancy.Caller;
+import io.micrometer.core.instrument.MeterRegistry;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -52,10 +53,12 @@ public class MessageService {
 
 	private final int maxMessageLength;
 
+	private final MeterRegistry meters;
+
 	MessageService(TransactionTemplate tx, ConversationAccess access, ConversationRepository conversations,
 			MessageRepository messages, ParticipantRepository participants, ReadCursorRepository cursors,
 			StateEventRepository stateEvents, ConversationLifecycle lifecycle, OutboxAppender outbox, Clock clock,
-			@Value("${app.limits.message-length}") int maxMessageLength) {
+			@Value("${app.limits.message-length}") int maxMessageLength, MeterRegistry meters) {
 		this.tx = tx;
 		this.access = access;
 		this.conversations = conversations;
@@ -67,6 +70,7 @@ public class MessageService {
 		this.outbox = outbox;
 		this.clock = clock;
 		this.maxMessageLength = maxMessageLength;
+		this.meters = meters;
 	}
 
 	/** Result of a send: the message and whether this call created it ({@code false} = idempotent replay). */
@@ -77,7 +81,23 @@ public class MessageService {
 		String clientMessageId = validateClientMessageId((request != null) ? request.clientMessageId() : null);
 		String body = normalizeBody((request != null) ? request.body() : null);
 		String fingerprint = Fingerprints.sha256Hex(body);
-		return this.tx.execute((status) -> sendInTransaction(caller, conversationId, clientMessageId, body, fingerprint));
+		java.time.Instant started = this.clock.instant();
+		try {
+			SendResult result = this.tx
+				.execute((status) -> sendInTransaction(caller, conversationId, clientMessageId, body, fingerprint));
+			this.meters.counter("message.send", "outcome", result.created() ? "created" : "replayed").increment();
+			this.meters.timer("message.send.duration")
+				.record(java.time.Duration.between(started, this.clock.instant()));
+			return result;
+		}
+		catch (ConversationConflictException ex) {
+			this.meters.counter("message.send", "outcome", "conflict").increment();
+			throw ex;
+		}
+		catch (IllegalArgumentException ex) {
+			this.meters.counter("message.send", "outcome", "rejected").increment();
+			throw ex;
+		}
 	}
 
 	private SendResult sendInTransaction(Caller caller, UUID conversationId, String clientMessageId, String body,

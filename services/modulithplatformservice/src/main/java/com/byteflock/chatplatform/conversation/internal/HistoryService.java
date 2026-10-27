@@ -4,6 +4,7 @@ import java.util.UUID;
 
 import com.byteflock.chatplatform.conversation.MessagePage;
 import com.byteflock.chatplatform.tenancy.Caller;
+import io.micrometer.core.instrument.MeterRegistry;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -22,11 +23,14 @@ public class HistoryService {
 
 	private final int historyPageMax;
 
+	private final MeterRegistry meters;
+
 	HistoryService(ConversationAccess access, MessageRepository messages,
-			@Value("${app.limits.history-page-max}") int historyPageMax) {
+			@Value("${app.limits.history-page-max}") int historyPageMax, MeterRegistry meters) {
 		this.access = access;
 		this.messages = messages;
 		this.historyPageMax = historyPageMax;
+		this.meters = meters;
 	}
 
 	public MessagePage page(Caller caller, UUID conversationId, Long before, Long after, int limit) {
@@ -37,6 +41,7 @@ public class HistoryService {
 			throw new IllegalArgumentException("limit must be positive");
 		}
 		this.access.requireReadable(caller, conversationId);
+		this.meters.counter("history.query").increment();
 		int pageSize = Math.min(limit, this.historyPageMax);
 		return (after != null) ? this.messages.pageAfter(caller.tenantId(), conversationId, after, pageSize)
 				: this.messages.pageBefore(caller.tenantId(), conversationId, before, pageSize);

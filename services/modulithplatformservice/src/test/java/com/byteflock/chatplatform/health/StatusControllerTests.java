@@ -19,6 +19,10 @@ class StatusControllerTests {
 	@MockitoBean
 	DependencyChecks checks;
 
+	/** Metrics are not part of a MVC slice but the exception advice counts problem codes. */
+	@MockitoBean
+	io.micrometer.core.instrument.MeterRegistry meters;
+
 	/** The tenancy web configuration is part of every MVC slice; its interceptor only needs the token verifier. */
 	@MockitoBean
 	SessionTokens sessionTokens;

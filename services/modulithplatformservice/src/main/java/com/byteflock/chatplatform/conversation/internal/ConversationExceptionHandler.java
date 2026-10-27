@@ -6,6 +6,7 @@ import com.byteflock.chatplatform.conversation.ConversationAccessDeniedException
 import com.byteflock.chatplatform.conversation.ConversationConflictException;
 import com.byteflock.chatplatform.conversation.ConversationNotFoundException;
 import com.byteflock.chatplatform.shared.Problems;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.tracing.Tracer;
 
 import org.springframework.beans.factory.ObjectProvider;
@@ -24,8 +25,11 @@ class ConversationExceptionHandler {
 
 	private final ObjectProvider<Tracer> tracer;
 
-	ConversationExceptionHandler(ObjectProvider<Tracer> tracer) {
+	private final MeterRegistry meters;
+
+	ConversationExceptionHandler(ObjectProvider<Tracer> tracer, MeterRegistry meters) {
 		this.tracer = tracer;
+		this.meters = meters;
 	}
 
 	@ExceptionHandler(AllocationRejectedException.class)
@@ -52,6 +56,7 @@ class ConversationExceptionHandler {
 
 	@ExceptionHandler(ConversationConflictException.class)
 	ProblemDetail conflict(ConversationConflictException ex) {
+		this.meters.counter("api.problems", "code", ex.code()).increment();
 		return Problems.of(HttpStatus.CONFLICT, ex.code(), detailFor(ex.code()), this.tracer.getIfAvailable());
 	}
 

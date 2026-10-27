@@ -22,6 +22,7 @@ import com.byteflock.chatplatform.outbox.OutboxAppender;
 import com.byteflock.chatplatform.tenancy.Caller;
 import com.byteflock.chatplatform.tenancy.Inbox;
 import com.byteflock.chatplatform.tenancy.TenantDirectory;
+import io.micrometer.core.instrument.MeterRegistry;
 import tools.jackson.databind.ObjectMapper;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -63,10 +64,12 @@ public class ConversationService {
 
 	private final int inboxPageMax;
 
+	private final MeterRegistry meters;
+
 	ConversationService(TransactionTemplate tx, ConversationAccess access, ConversationRepository conversations,
 			ParticipantRepository participants, StateEventRepository stateEvents, ConversationLifecycle lifecycle,
 			OutboxAppender outbox, ObjectMapper mapper, TenantDirectory directory, PresenceService presence, Clock clock,
-			@Value("${app.limits.inbox-page-max}") int inboxPageMax) {
+			@Value("${app.limits.inbox-page-max}") int inboxPageMax, MeterRegistry meters) {
 		this.tx = tx;
 		this.access = access;
 		this.conversations = conversations;
@@ -79,6 +82,7 @@ public class ConversationService {
 		this.presence = presence;
 		this.clock = clock;
 		this.inboxPageMax = inboxPageMax;
+		this.meters = meters;
 	}
 
 	/** Result of start/resume: the conversation and whether this call created it. */
@@ -188,6 +192,17 @@ public class ConversationService {
 
 	private ConversationView command(Caller caller, UUID conversationId, ConversationLifecycle.Command command,
 			CommandRequest request) {
+		try {
+			return commandInTransaction(caller, conversationId, command, request);
+		}
+		catch (ConversationConflictException ex) {
+			this.meters.counter("conversation.commands", "command", command.name(), "outcome", "conflict").increment();
+			throw ex;
+		}
+	}
+
+	private ConversationView commandInTransaction(Caller caller, UUID conversationId, ConversationLifecycle.Command command,
+			CommandRequest request) {
 		if (!caller.isAgent()) {
 			throw new ConversationAccessDeniedException();
 		}
@@ -197,6 +212,7 @@ public class ConversationService {
 			ConversationRow row = this.access.lockForWrite(caller, conversationId);
 			// 1. A satisfied command is a 200 no-op even when expectedVersion is stale (safe client retries).
 			if (this.lifecycle.isSatisfied(row.status(), row.archived(), command)) {
+				this.meters.counter("conversation.commands", "command", command.name(), "outcome", "noop").increment();
 				return this.access.view(caller, conversationId);
 			}
 			// 2. Optimistic check before the transition table is consulted.
@@ -210,6 +226,7 @@ public class ConversationService {
 			// 4. The transition table.
 			ConversationLifecycle.Outcome outcome = this.lifecycle.apply(row.status(), row.archived(), command);
 			if (outcome.noOp()) {
+				this.meters.counter("conversation.commands", "command", command.name(), "outcome", "noop").increment();
 				return this.access.view(caller, conversationId);
 			}
 			AssignmentState target = AssignmentTransitions.target(row.assignmentState(), outcome.assignmentEffect());
@@ -236,6 +253,7 @@ public class ConversationService {
 			this.outbox.append(row.tenantId(), "conversation", conversationId.toString(), "conversation.updated",
 					List.of(Channels.conversation(conversationId), Channels.inbox(row.tenantId(), row.inboxId())),
 					EventPayloads.conversationUpdated(view, outcome.change()));
+			this.meters.counter("conversation.commands", "command", command.name(), "outcome", "applied").increment();
 			return view;
 		});
 	}

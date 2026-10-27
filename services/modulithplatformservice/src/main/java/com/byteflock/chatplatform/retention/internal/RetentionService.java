@@ -9,6 +9,7 @@ import java.util.UUID;
 import com.byteflock.chatplatform.retention.PurgeRequest;
 import com.byteflock.chatplatform.retention.PurgeRunView;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -33,10 +34,13 @@ public class RetentionService {
 
 	private final Clock clock;
 
-	RetentionService(RetentionRepository repository, TransactionTemplate tx, Clock clock) {
+	private final MeterRegistry meters;
+
+	RetentionService(RetentionRepository repository, TransactionTemplate tx, Clock clock, MeterRegistry meters) {
 		this.repository = repository;
 		this.tx = tx;
 		this.clock = clock;
+		this.meters = meters;
 	}
 
 	public PurgeRunView run(PurgeRequest request) {
@@ -73,6 +77,9 @@ public class RetentionService {
 										OffsetDateTime.now(this.clock));
 							}
 							counter.add(messages, attachments, cursors);
+							this.meters
+								.counter("retention.purge.conversations", "result", request.dryRun() ? "dry-run" : "purged")
+								.increment();
 						}
 					});
 					counter.batches++;
