@@ -63,3 +63,6 @@ vitest.config.*.timestamp*
 test-results
 playwright-report
 *.tsbuildinfo
+
+# archify drafts and receipts (finished diagrams are copied to docs/architecture/diagrams/)
+.archify/

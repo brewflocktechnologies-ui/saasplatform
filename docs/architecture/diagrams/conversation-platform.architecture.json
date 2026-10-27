@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Conversation platform: component overview (design, Plan 01)",
+    "output": ".archify/architecture-conversation-platform-20261027-113201/conversation-platform.html",
+    "quality_profile": "showcase",
+    "locale": "en"
+  },
+  "components": [
+    { "id": "centrifugo", "type": "messagebus", "label": "Centrifugo v6.10.2", "sublabel": ":8000 · namespace chat", "tag": "history 100 / 300 s", "pos": [250, 40], "size": [190, 72] },
+    { "id": "widget", "type": "frontend", "label": "Visitor widget", "sublabel": "Lit 3 · :5173", "pos": [260, 190], "size": [170, 64] },
+    { "id": "dashboard", "type": "frontend", "label": "Agent dashboard", "sublabel": "Next.js 16 · :3000", "pos": [260, 350], "size": [170, 64] },
+    { "id": "api", "type": "backend", "label": "Platform API", "sublabel": "modulithplatformservice :8080", "tag": "tenancy · conversation", "pos": [600, 180], "size": [200, 84] },
+    { "id": "publisher", "type": "backend", "label": "OutboxPublisher", "sublabel": "same JVM · outbox module", "pos": [960, 40], "size": [190, 72] },
+    { "id": "postgres", "type": "database", "label": "PostgreSQL 18", "sublabel": "schema platform :5432", "tag": "source of truth", "pos": [960, 186], "size": [190, 72] },
+    { "id": "worker", "type": "backend", "label": "AssignmentWorker", "sublabel": "same JVM · conversation module", "pos": [960, 330], "size": [190, 72] },
+    { "id": "allocation", "type": "backend", "label": "Allocation service", "sublabel": "own container :8081", "tag": "level operations", "pos": [960, 480], "size": [190, 72] },
+    { "id": "allocdb", "type": "database", "label": "allocation-postgres", "sublabel": "own database :5433", "pos": [960, 630], "size": [190, 64] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "Browser (localhost)", "wraps": ["widget", "dashboard"] },
+    { "kind": "region", "label": "Allocation stack (unchanged engine)", "wraps": ["allocation", "allocdb"] }
+  ],
+  "connections": [
+    { "id": "widget-rest", "from": "widget", "to": "api", "label": "REST + contact JWT", "variant": "emphasis" },
+    { "id": "dashboard-rest", "from": "dashboard", "to": "api", "label": "REST + agent JWT", "variant": "emphasis", "toSide": "left" },
+    { "id": "write-tx", "from": "api", "to": "postgres", "label": "1 tx: row + outbox", "variant": "emphasis" },
+    { "id": "claim-outbox", "from": "publisher", "to": "postgres", "label": "claim lease · mark" },
+    { "id": "broadcast", "from": "publisher", "to": "centrifugo", "label": "POST /api/broadcast (key = eventId)", "variant": "emphasis" },
+    { "id": "ws-widget", "from": "centrifugo", "to": "widget", "label": "WS events", "variant": "emphasis" },
+    { "id": "ws-dashboard", "from": "centrifugo", "to": "dashboard", "label": "WS events", "variant": "emphasis", "fromSide": "left", "toSide": "left" },
+    { "id": "typing", "from": "api", "to": "centrifugo", "label": "typing (no outbox)", "variant": "dashed", "fromSide": "top", "toSide": "bottom" },
+    { "id": "worker-claim", "from": "worker", "to": "postgres", "label": "claim · project" },
+    { "id": "worker-alloc", "from": "worker", "to": "allocation", "label": "dispatch · poll · resolve" },
+    { "id": "assign-presence", "from": "api", "to": "allocation", "label": "/assign · presence (HTTP)", "fromSide": "bottom", "toSide": "left" },
+    { "id": "alloc-db", "from": "allocation", "to": "allocdb", "label": "own Flyway V1-V5" }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "Durable path", "items": ["Message, conversation update and outbox row commit in one transaction", "Publisher claims with FOR UPDATE SKIP LOCKED + lease; backoff, park, admin replay", "Delivery is at least once; clients dedupe by eventId and message id / sequence"] },
+    { "dot": "rose", "title": "Tenancy and tokens", "items": ["Session JWT (contact | agent) carries the tenant", "Centrifugo subscription token per exact channel after tenant + participant check", "LOCAL POC — NOT REAL AUTHENTICATION (local login, admin token)"] },
+    { "dot": "amber", "title": "Allocation", "items": ["No shared transaction: the conversation row is the durable request", "Worker polls; the platform stores a projection only", "Engine sweep may assign behind the platform's back"] },
+    { "dot": "slate", "title": "Not drawn", "items": ["Flyway runner job, OTel / Prometheus / Grafana stack (unchanged)", "Centrifugo connection and subscription tokens are fetched from the Platform API"] }
+  ]
+}
