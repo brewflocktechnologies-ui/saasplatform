@@ -1,38 +1,52 @@
 asyncapi: 3.0.0
 info:
-  title: Chat Platform real-time events (Centrifugo)
-  version: 0.2.0
+  title: Chat Platform realtime
+  version: 1.0.0
   description: |
-    Events published by `modulithplatformservice` through the Centrifugo server HTTP API **after** the database
-    commit. Browsers only subscribe (subscription JWT per exact actor + channel); client publication is disabled.
-    Delivery is at-most-once (publish-after-commit, no outbox): clients reload history from the REST API on
-    (re)subscribe and deduplicate by message id. Payload schemas: `libs/contracts/json-schema/chat/`.
-    LOCAL POC â€” demo identities `userone` / `agentbob` only.
+    Centrifugo channels of the conversation platform. Delivery is **at least once**: a client dedupes by `eventId` and
+    the message `id`/`sequence`, and always reconciles from the HTTP API on every (re)subscribe (`?after=<lastSequence>`).
+    The `chat` namespace stores a short history (`history_size` 100, `history_ttl` 300s, `force_recovery` true) as an
+    optimisation only; it is never the source of truth.
+
+    Browsers subscribe with a short-lived subscription JWT issued by the backend for one exact channel; they never see an
+    API key or an HMAC secret. Clients may not publish. The demo `chat:inbox` channel and the demo events are a
+    LOCAL POC — NOT REAL AUTHENTICATION and are removed with the demo module.
 defaultContentType: application/json
 servers:
   local:
     host: localhost:8000
     protocol: ws
     pathname: /connection/websocket
-    description: Centrifugo (local). Connection JWT from GET /api/v1/demo/realtime/connection-token.
+    description: Centrifugo (local). Connection JWT from the widget/agent realtime token endpoints.
 channels:
   conversation:
     address: 'chat:conversation:{conversationId}'
-    description: Live events of one conversation. agentbob (assigned agent) and userone (visitor) may subscribe.
+    description: One conversation. Readable by its contact and every agent of the tenant.
     parameters:
       conversationId:
         description: Conversation UUID.
     messages:
       messageCreated:
         $ref: '#/components/messages/messageCreated'
+      conversationUpdated:
+        $ref: '#/components/messages/conversationUpdated'
+      typing:
+        $ref: '#/components/messages/typing'
   inbox:
-    address: 'chat:inbox'
-    description: Agent inbox refresh signals. Only agentbob may subscribe. Clients refetch the inbox from the API.
+    address: 'chat:inbox:{tenantId}:{inboxId}'
+    description: Inbox of a tenant; agents only. Carries conversation lifecycle and message refresh signals.
+    parameters:
+      tenantId:
+        description: Tenant id (no colon; it is a channel segment).
+      inboxId:
+        description: Inbox UUID.
     messages:
-      messageCreated:
-        $ref: '#/components/messages/messageCreated'
       conversationCreated:
         $ref: '#/components/messages/conversationCreated'
+      conversationUpdated:
+        $ref: '#/components/messages/conversationUpdated'
+      messageCreated:
+        $ref: '#/components/messages/messageCreated'
 operations:
   receiveConversationEvents:
     action: receive
@@ -41,25 +55,40 @@ operations:
       $ref: '#/channels/conversation'
     messages:
       - $ref: '#/channels/conversation/messages/messageCreated'
+      - $ref: '#/channels/conversation/messages/conversationUpdated'
+      - $ref: '#/channels/conversation/messages/typing'
   receiveInboxEvents:
     action: receive
-    summary: Agent receives inbox refresh signals.
+    summary: Agent receives inbox signals.
     channel:
       $ref: '#/channels/inbox'
     messages:
-      - $ref: '#/channels/inbox/messages/messageCreated'
       - $ref: '#/channels/inbox/messages/conversationCreated'
+      - $ref: '#/channels/inbox/messages/conversationUpdated'
+      - $ref: '#/channels/inbox/messages/messageCreated'
 components:
   messages:
     messageCreated:
       name: message.created
       title: Message created
-      summary: A message was persisted.
+      summary: A message was persisted and its outbox row published.
       payload:
-        $ref: '../json-schema/chat/demo-message-created.v1.schema.json'
+        $ref: '../json-schema/chat/message-created.v1.schema.json'
     conversationCreated:
       name: conversation.created
       title: Conversation created
-      summary: The demo conversation was created.
+      summary: A conversation was created; the assignment is REQUESTED.
       payload:
-        $ref: '../json-schema/chat/demo-conversation-created.v1.schema.json'
+        $ref: '../json-schema/chat/conversation-created.v1.schema.json'
+    conversationUpdated:
+      name: conversation.updated
+      title: Conversation updated
+      summary: One state write or assignment projection change; the version increased by exactly one.
+      payload:
+        $ref: '../json-schema/chat/conversation-updated.v1.schema.json'
+    typing:
+      name: typing
+      title: Typing indicator
+      summary: Ephemeral, never persisted, never in the outbox.
+      payload:
+        $ref: '../json-schema/chat/typing.v1.schema.json'

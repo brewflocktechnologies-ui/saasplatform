@@ -745,6 +745,54 @@ paths:
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
+  /api/v1/admin/outbox:
+    get:
+      operationId: listOutboxEvents
+      summary: Inspect outbox rows by status (local-dev operator API)
+      description: LOCAL POC — NOT REAL AUTHENTICATION; served only while `app.local-dev.enabled=true`.
+      tags: [platform]
+      security: [{ AdminToken: [] }]
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [PENDING, PUBLISHED, PARKED] }
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Outbox rows, newest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/OutboxEventView' }
+        '401':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/v1/admin/outbox/{eventId}/replay:
+    parameters:
+      - name: eventId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: replayOutboxEvent
+      summary: Requeue a parked event (attempts reset, next attempt now)
+      tags: [platform]
+      security: [{ AdminToken: [] }]
+      responses:
+        '200':
+          description: The event after the replay (PENDING).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OutboxEventView' }
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/v1/status:
     get:
       operationId: getStatus
@@ -803,6 +851,11 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: Session JWT from `POST /api/v1/widget/sessions` (contact) or `POST /api/v1/agent/local-login` (agent).
+    AdminToken:
+      type: apiKey
+      in: header
+      name: X-Admin-Token
+      description: LOCAL POC — NOT REAL AUTHENTICATION. Local-dev operator API only.
   parameters:
     ActorId:
       name: actorId
@@ -1008,6 +1061,20 @@ components:
           type: array
           items: { $ref: '#/components/schemas/MessageView' }
         hasMore: { type: boolean }
+    OutboxEventView:
+      type: object
+      additionalProperties: false
+      required: [eventId, tenantId, eventType, status, attempts, nextAttemptAt, createdAt]
+      properties:
+        eventId: { type: string, format: uuid }
+        tenantId: { type: string }
+        eventType: { type: string }
+        status: { type: string, enum: [PENDING, PUBLISHED, PARKED] }
+        attempts: { type: integer, minimum: 0 }
+        nextAttemptAt: { type: string, format: date-time }
+        lastError: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        publishedAt: { type: [string, 'null'], format: date-time }
     InboxPage:
       type: object
       additionalProperties: false
