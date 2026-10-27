@@ -108,9 +108,10 @@ each engine call the worker continues only if `now + app.allocation.timeout` ≤
 processing the rest of the batch, and those rows are claimed again after the lease. Right before a
 `createConversation` or `dispatch` call it also re-reads `(archived_at, assignment_state)` with a tenant-filtered
 `SELECT` and skips the row if either changed since the claim (for example, archived meanwhile: the archive already moved
-it to `RELEASE_PENDING`). This keeps two instances from working the same row at once; an engine call can still be repeated (a crash, a lost
-response), and the keys and the read-first reconciliation below make a repeat safe. The worker never dispatches an archived
-row (R-P13): archiving moves `REQUESTED`, `QUEUED`, `ASSIGNED`, `REOPEN_PENDING` and `FAILED` rows to `RELEASE_PENDING`
+it to `RELEASE_PENDING`). This keeps two instances from working the same row at once; an engine call can still be
+repeated (a crash, a lost response), and the keys and the read-first reconciliation below make a repeat safe.
+
+The worker never dispatches an archived row (R-P13): archiving moves `REQUESTED`, `QUEUED`, `ASSIGNED`, `REOPEN_PENDING` and `FAILED` rows to `RELEASE_PENDING`
 (resolving does the same, R-P17), and the claim excludes archived `REQUESTED`/`QUEUED`/`FAILED` rows as a second guard.
 A claim is worker bookkeeping and does not change `version` (R-P9). A row entering `FAILED`, and each re-read that
 leaves it `FAILED`, gets `assignment_next_attempt_at = now + app.assignment.failed-poll` (60 s, R-P17); `QUEUED` rows

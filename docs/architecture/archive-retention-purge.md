@@ -75,8 +75,8 @@ transition table is in [domain-model.md](domain-model.md) section 5.
 
 `FOR UPDATE SKIP LOCKED` is appropriate here because batches are independent worker claims (master spec 8.4); a
 conversation locked by a concurrent command is skipped and caught by a later run. Purge emits no realtime event (R-P9,
-R-P25): the conversation is already resolved or archived (and so out of the default views), and a client that still
-shows it sees the purged state at its next reconcile or `version` jump (R3). A purged conversation's view carries
+R-P25): the conversation is already resolved or archived, and a client that still shows it sees the purged state at its
+next reconcile or `version` jump (R3). A purged conversation's view carries
 `purgedAt` and `unreadCount = 0` (R-P31 M5).
 
 ## 4. Run record (`purge_runs`, `PurgeRunView`)
