@@ -45,6 +45,9 @@ public abstract class PlatformIntegrationTest {
 	/** One stub for the whole JVM; {@link #cleanDatabase()} clears its recorded requests. */
 	protected static final CentrifugoStub CENTRIFUGO = new CentrifugoStub();
 
+	/** In-process allocation service fake (assignment flows); reset before each test. */
+	protected static final AllocationStub ALLOCATION = new AllocationStub();
+
 	@Autowired
 	protected MockMvcTester mvc;
 
@@ -75,6 +78,7 @@ public abstract class PlatformIntegrationTest {
 		registry.add("spring.datasource.username", POSTGRES::getUsername);
 		registry.add("spring.datasource.password", POSTGRES::getPassword);
 		registry.add("app.centrifugo.url", CENTRIFUGO::url);
+		registry.add("app.allocation.url", ALLOCATION::url);
 		registry.add("app.sessions.secret", () -> SESSION_SECRET);
 	}
 
@@ -93,6 +97,7 @@ public abstract class PlatformIntegrationTest {
 				""").update();
 		CENTRIFUGO.requests.clear();
 		CENTRIFUGO.reset();
+		ALLOCATION.reset();
 		this.testClock.reset();
 	}
 
