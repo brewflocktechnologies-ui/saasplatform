@@ -14,7 +14,10 @@
   "channel": {
     "namespaces": [
       {
-        "name": "chat"
+        "name": "chat",
+        "history_size": 100,
+        "history_ttl": "300s",
+        "force_recovery": true
       }
     ]
   },

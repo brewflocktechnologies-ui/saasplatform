@@ -15,7 +15,10 @@ public final class Channels {
 
 	private static final String INBOX_PREFIX = "chat:inbox:";
 
-	private static final Pattern INBOX = Pattern.compile("^chat:inbox:([^:]+):([0-9a-fA-F-]{36})$");
+	/** Canonical channels use lowercase UUIDs; anything else is treated as malformed (400), not as another channel. */
+	private static final Pattern CONVERSATION = Pattern.compile("^chat:conversation:([0-9a-f-]{36})$");
+
+	private static final Pattern INBOX = Pattern.compile("^chat:inbox:([^:]+):([0-9a-f-]{36})$");
 
 	private Channels() {
 	}
@@ -29,11 +32,15 @@ public final class Channels {
 	}
 
 	public static Optional<UUID> conversationId(String channel) {
-		if (channel == null || !channel.startsWith(CONVERSATION_PREFIX)) {
+		if (channel == null) {
+			return Optional.empty();
+		}
+		Matcher matcher = CONVERSATION.matcher(channel);
+		if (!matcher.matches()) {
 			return Optional.empty();
 		}
 		try {
-			return Optional.of(UUID.fromString(channel.substring(CONVERSATION_PREFIX.length())));
+			return Optional.of(UUID.fromString(matcher.group(1)));
 		}
 		catch (IllegalArgumentException ex) {
 			return Optional.empty();
