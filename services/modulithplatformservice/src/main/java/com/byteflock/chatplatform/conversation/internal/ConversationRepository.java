@@ -332,9 +332,9 @@ public class ConversationRepository {
 			OffsetDateTime now) {
 		return this.jdbc.sql("""
 				UPDATE conversations SET
-				    assignment_state = :state,
-				    assigned_agent_id = CASE WHEN :state = 'ASSIGNED' THEN :agentId ELSE NULL END,
-				    assignment_decision_id = CASE WHEN :state = 'ASSIGNED' THEN :decisionId ELSE NULL END,
+				    assignment_state = CAST(:state AS text),
+				    assigned_agent_id = CASE WHEN CAST(:state AS text) = 'ASSIGNED' THEN CAST(:agentId AS text) ELSE NULL END,
+				    assignment_decision_id = CASE WHEN CAST(:state AS text) = 'ASSIGNED' THEN CAST(:decisionId AS uuid) ELSE NULL END,
 				    assignment_reason = :reason,
 				    assignment_explanation = :explanation,
 				    assignment_next_attempt_at = :nextAttemptAt,
@@ -370,5 +370,12 @@ public class ConversationRepository {
 			.param("tenantId", tenantId)
 			.query(Integer.class)
 			.single();
+	}
+	/** Bookkeeping only: moves the schedule, never the state, the version or an event (R-P9). */
+	public int reschedule(UUID id, String tenantId, OffsetDateTime nextAttemptAt) {
+		return this.jdbc.sql("""
+				UPDATE conversations SET assignment_next_attempt_at = :nextAttemptAt
+				WHERE id = :id AND tenant_id = :tenantId
+				""").param("nextAttemptAt", nextAttemptAt).param("id", id).param("tenantId", tenantId).update();
 	}
 }
