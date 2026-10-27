@@ -3,7 +3,7 @@
   "diagram_type": "architecture",
   "meta": {
     "title": "Conversation platform: component overview (design, Plan 01)",
-    "output": ".archify/architecture-conversation-platform-20261027-113201/conversation-platform.html",
+    "output": "docs/architecture/diagrams/conversation-platform.html",
     "quality_profile": "showcase",
     "locale": "en"
   },

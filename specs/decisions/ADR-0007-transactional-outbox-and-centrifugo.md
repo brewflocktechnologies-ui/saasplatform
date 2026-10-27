@@ -39,7 +39,8 @@ Option 1 (overview D6):
   the event's `channels text[]` and the complete envelope as `payload`.
 - `OutboxPublisher` claims a batch (`batch-size` 100) in a short transaction, commits, publishes each row outside any
   transaction with `POST /api/broadcast` and `idempotency_key = eventId`, then marks it `PUBLISHED` or schedules a
-  retry: `min(1 s × 2^(attempts−1) ± 20 %, 60 s)`, attempts counted at claim, `PARKED` after 10 attempts, lease 30 s,
+  retry: `min(1 s × 2^(attempts−1) ± 20 %, 60 s)` (`Backoff.next(now, attempts − 1, …)` with a 0-based index, R-P15),
+  attempts counted at claim, `PARKED` after 10 attempts, lease 30 s,
   poll 500 ms. Marks are guarded by `locked_by`. Parked rows are listed and replayed through the local-dev admin API.
 - **Delivery is at least once.** Clients deduplicate by `eventId`, message `id` and `sequence`, and reconcile from the
   API on every subscribe; no part of the platform depends on a stronger guarantee.

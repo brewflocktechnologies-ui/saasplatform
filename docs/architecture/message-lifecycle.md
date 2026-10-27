@@ -32,7 +32,7 @@ One `TransactionTemplate` transaction at READ COMMITTED (D3), in this order:
 | 4 | **Idempotency lookup** | `SELECT … FROM messages WHERE conversation_id = :id AND sender_type = :t AND sender_id = :s AND client_message_id = :k` (`MessageRepository.findByClientMessageId`) | same fingerprint → commit with no writes, 200 with the original; different → 409 `CLIENT_MESSAGE_ID_REUSED` |
 | 5 | **Next sequence** | `UPDATE conversations SET last_sequence = last_sequence + 1 WHERE id = :id RETURNING last_sequence` (`bumpSequence`) | none |
 | 6 | **Insert the message** | `INSERT INTO messages (…, sequence, sender_type, sender_id, body, client_message_id, request_fingerprint) …` | check violation → rollback (validation already ran) |
-| 7 | **Update the conversation** | `touchActivity`: `last_message_at` = the message's `created_at`, `last_message_preview` = first 120 code points of the body; apply T6/T7 if decided in step 3 (`status = 'OPEN'`, `version = version + 1`, T7 also `assignment_state = 'REOPEN_PENDING'`); upsert the sender's participant row (`INSERT … ON CONFLICT DO NOTHING`; an agent's first message adds its `AGENT` row); advance the sender's read cursor to the new `sequence` (R12) | unique violation of `ux_conversations_active_per_contact` on T7 → rollback, 409 `CONVERSATION_ACTIVE_EXISTS` (D11) |
+| 7 | **Update the conversation** | `touchActivity`: `last_message_at` = the message's `created_at`, `last_message_preview` = first 120 code points of the body; apply T6/T7 if decided in step 3 (`status = 'OPEN'`, `version = version + 1`, T7 also `assignment_state = 'REOPEN_PENDING'` and `assignment_next_attempt_at = GREATEST(assignment_next_attempt_at, :now)`, [domain-model.md](domain-model.md) section 5.3); upsert the sender's participant row (`INSERT … ON CONFLICT DO NOTHING`; an agent's first message adds its `AGENT` row); advance the sender's read cursor to the new `sequence` (R12) | unique violation of `ux_conversations_active_per_contact` on T7 → rollback, 409 `CONVERSATION_ACTIVE_EXISTS` (D11) |
 | 8 | **Outbox** | `OutboxAppender.append(tenant, "conversation", <id>, "message.created", [conversation channel, inbox channel], {message: MessageView})`; with T6/T7 also `conversation.updated` (`change = REOPENED`) on the same two channels | `IllegalStateException` if no transaction is active (a bug) |
 | 9 | **State event** | with T6/T7: `REOPENED_BY_CONTACT`, actor `CONTACT` | none |
 | 10 | **Commit** and answer 201 with the persisted `MessageView` (server `id`, `sequence`, `createdAt`) | | |
@@ -40,6 +40,10 @@ One `TransactionTemplate` transaction at READ COMMITTED (D3), in this order:
 Rules:
 - Steps 7 to 9 run in one transaction, so their relative order is not observable; Plan 02 T3 writes the state event
   before the outbox row, which is equivalent.
+- Steps 4 to 7 address rows by the conversation id that step 1 obtained through the tenant-filtered lock; statements
+  keyed only by primary key are allowed inside the transaction after such a lock (R-P6 amended). The only statement on
+  a tenant-owned table without a tenant filter is the authorization probe of
+  [tenant-security.md](tenant-security.md) section 4.
 - Any exception rolls back every write: no message without its outbox row, no outbox row without its message, and no
   consumed sequence number (`MessageWriteIT.rollbackLeavesNoPartialState`).
 - Nothing in the transaction calls Centrifugo, the allocation service or any network (overview §4). Publication is the
@@ -91,13 +95,14 @@ Counter `message.send{outcome=created|replayed|conflict|rejected}` (Plan 05 T3).
 |---|---|---|
 | no cursor | newest page | `… WHERE tenant_id = :t AND conversation_id = :c ORDER BY sequence DESC LIMIT :limit + 1`, reversed |
 | `before=<seq>` | older page (scroll back), default `limit` 50 | `… AND sequence < :before ORDER BY sequence DESC LIMIT :limit + 1`, reversed |
-| `after=<seq>` | catch-up after reconnect, `limit` 200 | `… AND sequence > :after ORDER BY sequence ASC LIMIT :limit + 1` |
+| `after=<seq>` | catch-up after reconnect; the client sends `limit=200` (the server default stays 50) | `… AND sequence > :after ORDER BY sequence ASC LIMIT :limit + 1` |
 
 - `hasMore` is true when the extra row exists (the `count + 1` probe); for `after` it means "more newer rows", for the
   other two "more older rows".
 - `limit` defaults to 50, must be at least 1 (`limit=0` → 400), and is clamped to 200 (`app.limits.history-page-max`):
   `limit=10000` returns 200 items, not an error (`HistoryIT.pagingBeyondRangeAndOversizedLimitAreBounded`). `before` and
-  `after` together are 400 `VALIDATION_FAILED`. A cursor beyond the range returns an empty page with `hasMore = false`.
+  `after` together are 400 `VALIDATION_FAILED`; no cursor returns the newest page (R-P11). A cursor beyond the range
+  returns an empty page with `hasMore = false`.
 - No `OFFSET`; the cursor is `sequence` and the index is the unique `(tenant_id, conversation_id, sequence)`.
 - The conversation head (`lastSequence`) is in `ConversationView`, not in `MessagePage` (overview §5).
 - The same participant rules as sending apply; a caller of another tenant gets 403 and never rows

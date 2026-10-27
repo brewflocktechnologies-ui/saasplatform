@@ -62,7 +62,7 @@ Counter `realtime.tokens{type=connection|subscription, outcome=issued|denied}` m
 | `/api/v1/agent/**` | bearer, `typ = agent` | `tenant` claim | `sub` (agent id); every inbox of the tenant |
 | `/api/v1/admin/**` | `X-Admin-Token`; local-dev only | none in the caller (`Caller(null, ADMIN, "admin", null)`); the tenant is named in the path or body | cross-tenant operator |
 | `GET /api/v1/status`, `/api/v1/bootstrap`, `/actuator/health` | none | none; return no tenant data | `/actuator/prometheus` only in the `local` profile (`ObservabilityIT.prometheusOnlyInLocalProfile`) |
-| `OutboxPublisher`, `AssignmentWorker` | n/a | each claimed row's `tenant_id`, carried into every follow-up statement and call | the only cross-tenant statements are the two claims (Plan 02 global constraints) |
+| `OutboxPublisher`, `AssignmentWorker` | n/a | each claimed row's `tenant_id`, carried into every follow-up statement and call | the two claims are the only cross-tenant data statements; the one other unfiltered statement is the authorization probe of section 4 (R-P6) |
 | Calls to the allocation service | `X-Tenant-Id` = our tenant id, `X-Role` = `operator` (`admin` for seeding) | the conversation's or agent's tenant | [allocation-integration.md](allocation-integration.md) |
 
 Request bodies never carry a tenant id that the server trusts, except the admin and local-login endpoints above.
@@ -71,7 +71,7 @@ Request bodies never carry a tenant id that the server trusts, except the admin 
 
 | Action | Contact | Agent of the tenant |
 |---|---|---|
-| Read a conversation, its history and its view | only its own: `contact_id = sub`, `inbox_id = inbox` claim, same tenant | every conversation of every inbox of its tenant |
+| Read a conversation, its history and its view | only its own: `contact_id = sub`, `inbox_id = inbox` claim, same tenant; the view's `assignment` shows only `state` and `agentId` (R-P3) | every conversation of every inbox of its tenant, with the full assignment |
 | Send a message | own conversation; lifecycle rules apply | any non-archived conversation of its tenant (an agent message into `RESOLVED` is 409); sending adds an `AGENT` participant row. Assignment routes work but does not gate sending. |
 | Lifecycle commands, `/assign` | none | all ([domain-model.md](domain-model.md) section 4) |
 | Typing, read cursor | own conversation | any conversation of its tenant |
@@ -84,9 +84,15 @@ Cross-tenant access is 403 at the API and at token issuance (D14).
 
 - 404 `NOT_FOUND`: no conversation (or inbox) with that id exists.
 - 403 `FORBIDDEN`: it exists but belongs to another tenant, another contact or another inbox of the contact's tenant.
-- Every data statement is tenant-filtered (D3). The only statement keyed by id alone is the existence probe that decides
-  between 403 and 404; it returns a boolean and never row data. The 403 reveals that an id exists; ids are random
-  UUID v7 values, so the risk is low ([reference-comparison.md](../research/reference-comparison.md) row 10).
+- Every data statement is tenant-filtered (D3), with two allowed shapes besides (R-P6 amended):
+  - **one authorization probe**, `ConversationRepository.tenantAndInboxOf(UUID id)`, the only statement on a
+    tenant-owned table without a tenant filter. It returns only `(tenantId, inboxId, contactId)`, never conversation
+    data, and is used only to answer 403 (exists, other scope) versus 404 (no such id);
+  - **statements keyed only by primary key inside a transaction, after a tenant-filtered lock or lookup of that row**
+    (for example `bumpSequence`, the guarded `UPDATE … WHERE id = :id AND version = :expected`) and the worker marks
+    keyed by `event_id` and worker id after a claim.
+- The 403 confirms to a caller of another tenant that the id exists; ids are random UUID v7 values that cannot be
+  enumerated, so the risk is low ([reference-comparison.md](../research/reference-comparison.md) row 10).
 
 Tests: `ConversationApiIT.contactCannotReadAnotherInboxConversation`, `sameAgentIdInTwoTenantsIsIsolated`,
 `unknownConversationIs404ForParticipantsAnd403ForOthers`; `MessageWriteIT.nonParticipantContactIs403`,
@@ -101,7 +107,7 @@ Tests: `ConversationApiIT.contactCannotReadAnotherInboxConversation`, `sameAgent
 | `chat:conversation:<id>` of another tenant | 403 | 403 |
 | `chat:inbox:<ownTenant>:<inboxOfOwnTenant>` | 403 | allowed |
 | `chat:inbox:<tenantA>:<inboxOfTenantB>` (mismatched pair) or another tenant | 403 | 403 |
-| unknown conversation or inbox id | 404 | 404 |
+| unknown conversation or inbox id | 404 (no named test yet; Plan 03 `ChannelAuthorizer` throws only 403/400 and needs this case) | 404 (same) |
 | malformed (not exactly one of the two forms, uppercase UUID, extra segments) | 400 `VALIDATION_FAILED` | 400 |
 
 The browser cannot subscribe without a token (namespace option), cannot reuse a token for another channel (Centrifugo
@@ -116,7 +122,7 @@ cases), contract `subscriptionTokenForAnotherChannelIsRejected`, E2E `nonPartici
   `PUT /api/v1/admin/retention/policies/{tenantId}`, `POST /api/v1/admin/tenants`.
 - The controllers are `@ConditionalOnProperty(app.local-dev.enabled)`: with the flag off the routes do not exist (404).
   They require `X-Admin-Token` equal to `app.local-dev.admin-token` (`APP_LOCAL_ADMIN_TOKEN`), compared in constant
-  time; a blank configured token rejects every admin request. A session JWT is not accepted on admin routes and the
+  time with `MessageDigest.isEqual` (R-P11); a blank configured token rejects every admin request. A session JWT is not accepted on admin routes and the
   admin token is not accepted on widget or agent routes (`AdminApiIT.principalTypesDoNotCross`).
 - `app.local-dev.enabled` defaults to `false` and is `true` only in the `local` profile.
 - **Production guard:** `LocalDevGuard` fails startup with "app.local-dev.enabled must be false when
@@ -140,8 +146,8 @@ because there are no uploads (D15).
 Origins: **existing** backend CORS allows `APP_CORS_ALLOWED_ORIGINS` (`http://localhost:3000,http://localhost:5173`,
 `shared/WebConfig.java`); Plan 02 T4 adds methods `PUT`, `DELETE`, `OPTIONS` and headers `Authorization`,
 `Content-Type`, `Idempotency-Key`, `X-Admin-Token`, and keeps exposing `X-Trace-Id`. Centrifugo checks the same two
-origins in `client.allowed_origins` (a static list). The widget bundle is served with `Access-Control-Allow-Origin: *`
-so it can be embedded; it holds no secrets. Browser-facing URLs are `localhost` URLs only, and no secret is in a
+origins in `client.allowed_origins` (a static list). **Existing:** the widget bundle is served with
+`Access-Control-Allow-Origin: *` (`apps/chatwidget/nginx.conf`) so it can be embedded; it holds no secrets. Browser-facing URLs are `localhost` URLs only, and no secret is in a
 `PUBLIC_*` or `VITE_*` variable (overview §4).
 
 ## 8. Threats and mitigations
@@ -157,7 +163,7 @@ so it can be embedded; it holds no secrets. Browser-facing URLs are `localhost` 
 | Leaking data in errors or logs | problem details with `code`, no stack, SQL, token or body; logs without bodies, tokens or secrets | `ConversationApiIT.validationErrorsAreProblemJsonWithCode`, `LogHygieneTest` |
 | Enumerating ids | random UUID v7; 403/404 rule (section 4) | |
 | Admin misuse | admin API absent unless local-dev; constant-time token check; startup guard in production | `AdminApiIT`, `OutboxAdminIT.adminRoutesAbsentWhenLocalDevDisabled`, `LocalDevGuardTest` |
-| A visitor sees routing details | the contact receives the same `ConversationView` as agents, including the assignment projection (agent id, reason, explanation) of its own conversation; accepted for the MVP, a contact-facing view is NEXT | n/a |
+| A visitor sees internal routing details | for contact callers and in every `conversation.created` / `conversation.updated` payload (the conversation channel is shared with the visitor), `assignment` carries only `state` and `agentId`; `decisionId`, `reason` and `explanation` are null and reach agents only through `GET /api/v1/agent/conversations/{id}` (R-P3) | Plan 02 view test and Plan 04 projection-event tests (R-P3 amendments) |
 
 Isolation is enforced in application SQL and tests; the database adds no guard in the MVP (no row-level security, no
 composite `(tenant_id, id)` foreign keys, R10). A missed predicate is therefore caught only by tests until the ADR-0008

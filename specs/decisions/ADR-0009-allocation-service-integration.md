@@ -15,7 +15,8 @@ V1 to V5), REST under `/api/v1`, local header auth (`X-Tenant-Id`, `X-Role`, `Id
 sweep, feature levels from `basic` to `workbench`, no Dockerfile, no outbound calls or webhooks
 (allocation-service-integration.md sections 2 to 7). It owns assignment records, agent availability and capacity.
 Master spec 11.4 requires reusing it, forbids a fictitious transaction across two services and forbids duplicating the
-allocation algorithm. Overview §4 allows exactly one change to the engine: an added Dockerfile.
+allocation algorithm. Overview §4 allows only one kind of change to the engine: packaging. Plan 04 T1 adds a
+`Dockerfile`, a `.dockerignore` and one README line, and touches no source.
 
 ## Options
 
@@ -44,9 +45,14 @@ Option 1 (overview D8, D9):
   `assignment_reason`, `assignment_explanation`) and the request bookkeeping. `AssignmentWorker` claims due rows with
   `FOR UPDATE SKIP LOCKED` and a lease, calls the engine outside any transaction, and projects the result in a new
   transaction guarded by an `assignment_state` precondition: `REQUESTED → dispatch`, `QUEUED → poll`,
-  `RELEASE_PENDING → resolve`, `REOPEN_PENDING → requeue REOPEN`. Worker keys are `assign:<conversationId>:<attempt>`.
-- Agents set availability with `PUT /api/v1/agent/presence`, forwarded to the engine (60 s heartbeat TTL, 30 s
-  dashboard heartbeat); the platform keeps no second availability store.
+  `RELEASE_PENDING → resolve`, `REOPEN_PENDING → requeue REOPEN` (only `REQUESTED` rows dispatch, R-P1). Worker keys
+  are `assign:<conversationId>:<attempt>`, a new key per attempt. Setup errors count in `assignment_setup_failures`
+  (R-P2); `RELEASE_PENDING` never fails (R-P14).
+- Archived conversations hold no capacity: archiving releases the assignment (`RELEASE_PENDING`), unarchiving an open
+  conversation requests it again (`REOPEN_PENDING`), and the worker never dispatches an archived row (R-P13).
+- Agents set availability with `PUT /api/v1/agent/presence`, forwarded to the engine without a timestamp so the engine
+  stamps its own clock (R-P4; 60 s heartbeat TTL, 30 s dashboard heartbeat); the platform keeps no second
+  availability store.
 - Projection changes emit `conversation.updated` through the outbox (ADR-0007).
 
 ## Consequences
@@ -59,13 +65,16 @@ Option 1 (overview D8, D9):
   an idempotency record and a decision row in the engine.
 - The platform must branch on every engine outcome (HTTP 200 does not mean assigned) and reconcile non-idempotent calls
   (resolve, requeue) by reading the record.
+- `ASSIGNED` rows are not reconciled in the background in the MVP (R-P14): a change made directly in the allocation
+  service (its workbench or API) is not reflected until a platform command touches the conversation.
 - Two databases, one more container and image, and a CI E2E job that runs only where the engine checkout exists.
 
 ## Operational impact
 
 - Ports 8081 and 5433; `ALLOCATION_DB_PASSWORD`, `ALLOCATION_URL`, `ALLOCATION_ENGINE_DIR` in `.env`.
 - Seeding: `AllocationLocalSeeder` (local profile) and `POST /api/v1/admin/tenants`; a reset engine database is repaired
-  by re-seeding (the worker backs off on `TENANT_NOT_FOUND` for up to 30 attempts).
+  by re-seeding (the worker backs off on `TENANT_NOT_FOUND` for up to 30 consecutive setup errors). One inbox (queue) per
+  tenant in MVP seeding (R-P12).
 - `/api/v1/status` reports the engine (`allocation`); `allocation.requests{operation, outcome}`; conversations in
   `FAILED` are visible in the dashboard queue and need an agent's `/assign`.
 

@@ -12,8 +12,8 @@ check but never written ([workspace-inventory.md](../research/workspace-inventor
 | Operation | Endpoint / actor | What changes | What is kept | Reversible | Audit |
 |---|---|---|---|---|---|
 | **Resolve** | `POST /api/v1/agent/conversations/{id}/resolve`, agent | `status = RESOLVED`, `resolved_at`; assignment released through the allocation service (`RELEASE_PENDING`) | all messages and history | yes: reopen, or a contact message (auto-reopen, D10) | state event `RESOLVED`, `conversation.updated` |
-| **Archive** | `POST …/archive`, agent; purge as `system:retention` | `archived_at`, `archived_by`, `archive_reason`; the conversation leaves the default inbox view (`archived=false`) and accepts no messages (409 `CONVERSATION_ARCHIVED`; the widget then starts a new conversation) | status, assignment, all messages | yes: unarchive (not after purge) | state event `ARCHIVED` |
-| **Unarchive** | `POST …/unarchive`, agent | archive marker cleared; 409 `CONVERSATION_ACTIVE_EXISTS` if it would give the contact a second active conversation (D11); 409 `INVALID_TRANSITION` if purged | everything | yes | state event `UNARCHIVED` |
+| **Archive** | `POST …/archive`, agent; purge as `system:retention` | `archived_at`, `archived_by`, `archive_reason`; the conversation leaves the default inbox view (`archived=false`) and accepts no messages and no status change (409 `CONVERSATION_ARCHIVED`; the widget then starts a new conversation); an assignment in `REQUESTED`, `QUEUED`, `ASSIGNED` or `REOPEN_PENDING` is released through the allocation service (`RELEASE_PENDING`), because an archived conversation holds no capacity (R-P13) | status, all messages | yes: unarchive (not after purge) | state event `ARCHIVED` |
+| **Unarchive** | `POST …/unarchive`, agent | archive marker cleared; an `OPEN` or `PENDING` conversation requests assignment again (`REOPEN_PENDING`, R-P13); 409 `CONVERSATION_ACTIVE_EXISTS` if it would give the contact a second active conversation (D11); 409 `INVALID_TRANSITION` if purged (R-P8) | everything | yes | state event `UNARCHIVED` |
 | **Reopen** | `POST …/reopen`, agent; or a contact message into `RESOLVED` | `status = OPEN`; reassignment requested (`REOPEN_PENDING`); rejected while archived | prior messages and state events | yes: resolve again | state event `REOPENED` / `REOPENED_BY_CONTACT` |
 | **Delete message** (hide) | none in the MVP (NEXT) | a future tombstone: `deleted_at`, `deleted_by`, `deletion_reason`, body removed, `sequence` kept (R2) | the row and its sequence | n/a | n/a |
 | **Purge** | `POST /api/v1/admin/retention/purge`, operator, local-dev | hard-deletes messages, attachment rows, read cursors and outbox rows of eligible conversations; sets `purged_at`, archives, clears the preview (D16) | conversation row, participants, state events | **no** | `purge_runs` row (R16) |
@@ -61,7 +61,7 @@ transition table is in [domain-model.md](domain-model.md) section 5.
    (`RetentionIT.purgeStopsAtMaxBatches`).
 
 `FOR UPDATE SKIP LOCKED` is appropriate here because batches are independent worker claims (master spec 8.4); a
-conversation locked by a concurrent command is skipped and caught by a later run. Purge emits no realtime event: the
+conversation locked by a concurrent command is skipped and caught by a later run. Purge emits no realtime event (R-P9): the
 conversation is already resolved, and a client that still shows it sees the archive state at its next
 reconcile or `version` jump (R3).
 

@@ -24,8 +24,8 @@ the outbox row ([ADR-0006](ADR-0006-message-write-and-ordering.md)). Whatever ow
 1. **The spec's fine-grained map** (about 14 modules). Clear names, but `message` would need to lock and mutate
    conversation internals through a public API, or `conversation` and `message` would depend on each other (a cycle
    Spring Modulith rejects). `presence`, `attachment`, `audit` and `identity` would hold almost no code in the MVP.
-2. **Seven product modules by consistency boundary** (`tenancy`, `conversation`, `assignment`, `outbox`, `realtime`,
-   `retention`, plus the existing `health`, `bootstrap`, `shared`). Fewer, larger modules; every edge points one way.
+2. **Six product modules by consistency boundary** (`tenancy`, `conversation`, `assignment`, `outbox`, `realtime`,
+   `retention`), plus the existing `health`, `bootstrap`, `shared`. Fewer, larger modules; every edge points one way.
 3. **Separate services.** Rejected by ADR-0002 and by overview §4 ("no extra microservice").
 4. **One product module.** No enforced boundaries; the allocation gateway, the outbox and tenancy would blur.
 

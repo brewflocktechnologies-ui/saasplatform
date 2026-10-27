@@ -41,8 +41,11 @@ Option 1 with identity (a) (overview D3, D7, D14; rulings R6, R10):
   secret `APP_SESSION_TOKEN_HMAC_SECRET_KEY`, distinct from the Centrifugo secrets. Visitors get a token from
   `POST /api/v1/widget/sessions` (public `widgetKey` → inbox → contact); agents from `POST /api/v1/agent/local-login`
   (local-dev only).
-- Every tenant-owned table carries `tenant_id`, every statement filters it; the only cross-tenant statements are the
-  outbox and assignment worker claims, which carry each row's tenant into every follow-up. A contact reaches only its
+- Every tenant-owned table carries `tenant_id`, every statement filters it. Exceptions (R-P6 amended): the outbox and
+  assignment worker claims, which carry each row's tenant into every follow-up; one authorization probe,
+  `ConversationRepository.tenantAndInboxOf(UUID id)`, which returns only `(tenantId, inboxId, contactId)` to decide 403
+  versus 404; and statements keyed only by primary key inside a transaction after a tenant-filtered lock or lookup of
+  that row. A contact reaches only its
   own conversations; an agent reaches every conversation of its tenant's inboxes. Cross-tenant access is 403 at the API
   and at subscription-token issuance; an unknown id is 404.
 - Centrifugo subscription tokens are issued per exact channel after the tenant and participant check;
@@ -60,8 +63,11 @@ Option 1 with identity (a) (overview D3, D7, D14; rulings R6, R10):
   constraint treats any repository method without a `tenantId` parameter as a defect, Plans 02 to 07 add a
   cross-tenant test per endpoint family and per token request, and Plan 07 asserts cross-table tenant consistency with
   SQL invariants.
-- The 403-versus-404 rule needs one id-only existence probe that returns no row data; it reveals that an id exists,
-  which is acceptable for random UUIDs.
+- The 403-versus-404 rule needs the one authorization probe `tenantAndInboxOf(id)`, which returns only the tenant,
+  inbox and contact ids and never conversation data; it confirms to another tenant that an id exists, which is
+  acceptable for UUID v7 ids that cannot be enumerated (R-P6).
+- Contact-facing views and conversation events carry only the assignment's `state` and `agentId` (R-P3); routing
+  details stay on the agent API.
 - Visitor identity is weak by design: anyone can claim an `externalId` and resume that visitor's conversation. This is
   acceptable only locally.
 - Changing a session secret ends every session (no key ids, no rotation).

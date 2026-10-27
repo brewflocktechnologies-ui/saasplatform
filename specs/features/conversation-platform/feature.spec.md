@@ -1,6 +1,6 @@
 # Feature: Multi-tenant conversation platform
 
-- **Status:** Approved (design, Plan 01); implemented by Plans 02 to 07
+- **Status:** In review (design, Plan 01); implemented by Plans 02 to 07
 - **Owner:** brewflock
 - **Date:** 2026-10-27
 - **Related ADRs:** [ADR-0002](../../decisions/ADR-0002-modular-monolith.md), [ADR-0003](../../decisions/ADR-0003-dedicated-flyway-runner.md),
@@ -95,6 +95,8 @@ integrity and security", `18-L` = "Local platform").
     `CONVERSATION_ARCHIVED` and the widget offers a new conversation.
   - AC-7.4 An archived conversation leaves the default list and appears with `archived=true`; unarchive or reopen that
     would create a second active conversation for the contact is 409 `CONVERSATION_ACTIVE_EXISTS`.
+  - AC-7.5 Archiving a conversation releases its agent's capacity in the allocation service; unarchiving an `OPEN` or
+    `PENDING` conversation requests assignment again (R-P13).
 - **US-8** As a participant I want paginated history and unread counts.
   - AC-8.1 `before=` pages walk the whole history in pages of 50 without gaps or repeats; `after=` returns the newer
     messages; `limit` is clamped to 200 (18-F8).
@@ -126,7 +128,8 @@ integrity and security", `18-L` = "Local platform").
 - New tables in `database/flywayMigration/sql/V3__conversation_platform.sql` (Plan 02 T1), every one with `tenant_id`
   except `tenants` itself: `tenants`, `inboxes`, `contacts`, `agents`, `conversations`, `conversation_participants`,
   `messages`, `message_attachments`, `conversation_read_cursors`, `conversation_state_events`, `outbox_events`,
-  `retention_policies`, `purge_runs`. Columns, keys, checks and indexes: [domain-model.md](../../../docs/architecture/domain-model.md)
+  `retention_policies`, `purge_runs`; `conversations` includes `assignment_setup_failures` (R-P2), and the nullable
+  columns are exactly those domain-model.md marks (R-P7). Columns, keys, checks and indexes: [domain-model.md](../../../docs/architecture/domain-model.md)
   section 3.
 - Expand/contract: V3 only adds; V1 and V2 stay untouched, so the demo keeps working until Plan 06 removes its code.
   V2's `chat_conversations` and `chat_messages` are dropped by a later migration (`V4` or later) only after Plan 06.
@@ -142,7 +145,7 @@ required `code` and optional `traceId`, `reasonCodes`). All endpoints of overvie
 |---|---|---|---|
 | `POST /api/v1/widget/sessions` | public | `{widgetKey, externalId?, displayName?, sessionToken?}` → `{sessionToken, expiresAt, tenantId, inbox:{id,name}, contact:{id,displayName}}` | 02 |
 | `POST /api/v1/widget/conversations` | contact | start or resume → `ConversationView`, 201 created / 200 resumed | 02 |
-| `GET /api/v1/widget/conversations/{id}` | contact | → `ConversationView` (with `agentOnline`) | 02, 04 |
+| `GET /api/v1/widget/conversations/{id}` | contact | → `ConversationView` (with `agentOnline`; `assignment` shows only `state` and `agentId`, R-P3) | 02, 04 |
 | `GET /api/v1/widget/conversations/{id}/messages?before=&after=&limit=` | contact | → `MessagePage` | 02 |
 | `POST /api/v1/widget/conversations/{id}/messages` | contact | `SendMessageRequest` → `MessageView`, 201 / 200 replay | 02 |
 | `POST /api/v1/widget/conversations/{id}/typing` | contact | `{typing}` → 202 | 03 |
@@ -180,7 +183,8 @@ required `code` and optional `traceId`, `reasonCodes`). All endpoints of overvie
   Every problem carries `traceId`.
 - **Events** (Centrifugo, at least once): channels `chat:conversation:<uuid>` and `chat:inbox:<tenantId>:<inboxUuid>`;
   envelope `{eventId, eventType, schemaVersion, tenantId, conversationId, occurredAt, data}`; types `message.created`,
-  `conversation.created`, `conversation.updated` (`change`), `typing`. JSON Schemas `libs/contracts/json-schema/chat/*.v1`
+  `conversation.created`, `conversation.updated` (`change`), `typing`. Conversation event payloads carry the assignment's
+  `state` and `agentId` only (R-P3); agents read routing details with `GET /api/v1/agent/conversations/{id}`. JSON Schemas `libs/contracts/json-schema/chat/*.v1`
   and AsyncAPI `libs/contracts/asyncapi/chat-realtime.yaml` (Plan 03 T5); details in
   [realtime-and-recovery.md](../../../docs/architecture/realtime-and-recovery.md).
 - **Versioning / deprecation:** event schemas are versioned by file (`.v1`) and `schemaVersion`; consumers ignore
@@ -193,7 +197,8 @@ required `code` and optional `traceId`, `reasonCodes`). All endpoints of overvie
   statement filters `tenant_id`; cross-tenant access is 403 at the API and at subscription-token issuance; subscription
   tokens are bound to one exact channel. Full rules: [tenant-security.md](../../../docs/architecture/tenant-security.md).
 - Threats and mitigations (spoofing, cross-tenant leakage, channel hijack, forged events, XSS, abuse, log leakage,
-  enumeration, admin misuse): tenant-security.md section 8. Local shortcuts ("LOCAL POC — NOT REAL AUTHENTICATION") and
+  enumeration, admin misuse, routing details shown to visitors): tenant-security.md section 8. The only unfiltered
+  statement is the authorization probe `tenantAndInboxOf(id)` (R-P6). Local shortcuts ("LOCAL POC — NOT REAL AUTHENTICATION") and
   their production replacements: section 9 there.
 - Secrets introduced: `APP_SESSION_TOKEN_HMAC_SECRET_KEY`, `APP_LOCAL_ADMIN_TOKEN`, `ALLOCATION_DB_PASSWORD`
   (`__generate__` in `.env.example`); flags `APP_LOCAL_DEV_ENABLED` (default false), `APP_SEED_WIDGET_KEY`.
@@ -209,7 +214,8 @@ required `code` and optional `traceId`, `reasonCodes`). All endpoints of overvie
   `data-subscribed`.
 - **Dashboard** (`/agent`): `queue-tab`, `mine-tab`, all, `archived-toggle`, `inbox-empty`, `inbox-item` with
   `unread-count`, status and assignment state; conversation pane with `load-older`, `agent-messages`, `typing-indicator`,
-  `assignment-state`, `assignment-explanation`, actions `action-assign-me`, `action-auto-assign`, `action-reassign`,
+  `assignment-state`, `assignment-explanation` (read from the agent view, refetched when an event changes the open
+  conversation, R-P3), actions `action-assign-me`, `action-auto-assign`, `action-reassign`,
   `action-resolve`, `action-reopen`, `action-pending`, `action-archive`, `action-unarchive` (each sends
   `expectedVersion`; `STALE_VERSION` shows a notice and reloads); `availability-select`, `connection-state`,
   `agent-error`, `agent-notice`, `agent-id` ("Demo agent: agentbob") and the POC banner.
@@ -235,14 +241,19 @@ Telemetry that proves it in Grafana/Prometheus: `message.send{outcome}`, `messag
 `realtime.tokens{type,outcome}`, `rate_limit.rejections{scope}`, `retention.purge.conversations{result}`,
 `api.problems{code}`; every response carries `X-Trace-Id`, every outbox row its `trace_id`.
 
-Design rules without a named test in the plans (to add in the plan that owns the code):
-- `sync.ts`: a conversation event with a `version` jump greater than 1, or received while not caught up, refetches the
-  conversation view, and every `subscribed` refetches it (R3, R5; Plan 06 T1).
-- `sync.ts`: catch-up stops after 5 pages of 200 and takes the full-reload path (R5; Plan 06 T1).
+Tests the Plan 01 rulings add to the plans (amendments recorded in the Plan 01 ledger):
+`LifecycleIT.unarchivePurgedConversationIs409` and `versionIncrementsOnStateWritesOnly` (Plan 02, R-P8, R-P9); archive
+releasing and unarchive re-requesting the assignment (Plan 02 `LifecycleIT`, Plan 04 claim SQL, R-P13); the reduced
+contact view and event payloads (Plan 02, Plan 04, R-P3); `assignment_setup_failures` counting and reset (Plan 04, R-P2);
+presence without `heartbeatAt` (Plan 04, R-P4); `sync.ts` 5-page cap and version-rule refetches (Plan 06 T1, R-P5).
+
+Design rules still without a named test (to add in the plan that owns the code):
 - `sync.ts`: a failed apply keeps the cursor and does a full reload (SI-6); an API head below `lastContiguous` does a
-  full reload (SI-9 client side); the snapshot-plus-events property test over the three interleavings (SI-12).
-- `ConversationService`: unarchive of a purged conversation is 409 `INVALID_TRANSITION` (domain-model.md section 5.2;
-  Plan 05 T1 or Plan 02 T3).
+  full reload (SI-9 client side); the snapshot-plus-events property test over the three interleavings (SI-12)
+  (Plan 06 T1).
+- `ChannelAuthorizer`: a subscription-token request for an unknown conversation or inbox id answers 404
+  ([tenant-security.md](../../../docs/architecture/tenant-security.md) section 5); Plan 03 T3 currently throws only
+  403 and 400, so its `RealtimeTokenIT` needs this case.
 
 ## 9. Rollout, compatibility and rollback
 

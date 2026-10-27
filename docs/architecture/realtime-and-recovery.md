@@ -40,7 +40,7 @@ Every event, durable or ephemeral, is one JSON object (`EventEnvelope`, schema `
 | `schemaVersion` | int | 1 |
 | `tenantId` | string | tenant of the conversation |
 | `conversationId` | UUID, nullable | the conversation (always set for the four MVP types) |
-| `occurredAt` | ISO-8601 | server `Clock` time when the change committed (appender time) |
+| `occurredAt` | ISO-8601 | server `Clock` time when the transaction appended the event (before its commit) |
 | `data` | object | per type, below |
 
 Centrifugo's own publication offset and epoch are never part of the application contract (master spec 9.3).
@@ -50,9 +50,13 @@ Centrifugo's own publication offset and epoch are never part of the application 
 | `eventType` | Channels | Durable (outbox) | `data` (R14) | Counter carried |
 |---|---|---|---|---|
 | `message.created` | conversation + inbox | yes | `{message: MessageView}` | `data.message.sequence` (R2) |
-| `conversation.created` | inbox | yes | `{conversation: ConversationView}` without `unreadCount` and `agentOnline` | `data.conversation.version` (R3) |
-| `conversation.updated` | conversation + inbox | yes | `{conversation: …same…, change}` | `data.conversation.version` |
+| `conversation.created` | inbox | yes | `{conversation: ConversationView}` without `unreadCount` and `agentOnline`, and with `assignment` reduced to `state` and `agentId` (`decisionId`, `reason`, `explanation` null; R-P3) | `data.conversation.version` (R3) |
+| `conversation.updated` | conversation + inbox | yes | `{conversation: …same reduced view…, change}` | `data.conversation.version` |
 | `typing` | conversation | no (direct publish) | `{participantType, participantId, typing}` | none |
+
+Event payloads never carry the assignment's decision id, reason or explanation, because the conversation channel is
+shared with the visitor and those fields describe internal routing (R-P3). The dashboard reads them with
+`GET /api/v1/agent/conversations/{id}` when an event changes the conversation it has open.
 
 `change` of `conversation.updated` (D12) and its source ([domain-model.md](domain-model.md) sections 5.3 and 6):
 
@@ -88,7 +92,7 @@ the purge (D16), and Centrifugo history holds them for at most `history_ttl` (30
 | 1 | **Claim** a bounded batch in its own short transaction, then commit | `UPDATE outbox_events SET locked_by = :worker, locked_until = :now + :lease, attempts = attempts + 1 WHERE event_id IN (SELECT event_id FROM outbox_events WHERE status = 'PENDING' AND next_attempt_at <= :now AND (locked_until IS NULL OR locked_until < :now) ORDER BY next_attempt_at, created_at LIMIT :batch FOR UPDATE SKIP LOCKED) RETURNING …` |
 | 2 | **Publish** each row outside any transaction | `RealtimePublisher.broadcast(channels, payload, idempotencyKey = eventId)` → `POST /api/broadcast` `{channels, data, idempotency_key}` with `X-API-Key`; 2 s timeout. Success needs HTTP 200, no top-level `error` and no `error` in any `result.responses[i]`; Centrifugo's 200-with-error is a failure (`OutboxPublisherIT.centrifugoErrorObjectIsAFailure`). |
 | 3a | **Mark published** | `status = 'PUBLISHED'`, `published_at = now`, lock cleared, `WHERE event_id = :id AND locked_by = :worker` |
-| 3b | **Mark failed**: retry with backoff | `next_attempt_at = Backoff.next(now, attempts, base, max, rng)` = `now + min(base × 2^(attempts−1) ± 20 % jitter, max)` (jitter before the cap, overview §7 J); `last_error` = exception class name or HTTP status, never payload text; lock cleared; same `locked_by` guard |
+| 3b | **Mark failed**: retry with backoff | `next_attempt_at = Backoff.next(now, attempts − 1, base, max, rng)`. `Backoff.next(now, n, base, max, rng) = now + min(base × 2^n ± 20 % jitter, max)` takes a 0-based retry index `n`, so the first retry waits about `base` (R-P15; jitter before the cap, overview §7 J); `last_error` = exception class name or HTTP status, never payload text; lock cleared; same `locked_by` guard |
 | 3c | **Park** after the retry budget | a failure with claimed `attempts >= max-attempts` sets `status = 'PARKED'`; parked rows are never dropped and never retried automatically |
 | 4 | **Recover crashed workers** | a row whose `locked_until` passed is claimable again; the crash used up one attempt. A mark by a worker that lost its lease updates 0 rows and is ignored (`OutboxPublisherIT.lostLeaseMarkIsIgnored`). |
 | 5 | **Replay** (operator) | `POST /api/v1/admin/outbox/{eventId}/replay`: `PARKED` → `PENDING`, `attempts = 0`, `next_attempt_at = now`; logged at INFO with `eventId` (R16). `GET /api/v1/admin/outbox?status=&limit=` lists rows. Local-dev only, `X-Admin-Token`. |
@@ -122,7 +126,8 @@ State per open conversation (`createConversationSync` in `libs/chat-client`, Pla
 - `lastContiguous` (called `lastSequence()` in `sync.ts`): highest `sequence` such that every message up to it, from the
   oldest loaded page on, has been applied;
 - `knownVersion`: `version` of the last applied `ConversationView`;
-- a bounded set of seen `eventId`s (500 entries);
+- a bounded set of seen `eventId`s (500 entries) per view: the dashboard's inbox list and its open thread keep separate
+  sets, so one event delivered on both channels is applied once to each view;
 - a buffer of events received while a reconcile is running, and a `caughtUp` flag.
 
 **Bootstrap** (subscribe first, then fetch; zulip.md SI-1):
@@ -142,10 +147,10 @@ State per open conversation (`createConversationSync` in `libs/chat-client`, Pla
 1. If `lastContiguous = 0`: load the newest page (no cursor, `limit` 50); `lastContiguous` = its highest `sequence`.
    Older pages load on demand with `before=` (`load-older`).
 2. Otherwise fetch `?after=<lastContiguous>&limit=200`, merge by `sequence`, advance `lastContiguous`; repeat while
-   `hasMore`, **at most 5 pages**. If `hasMore` is still true after 5 pages, do a **full reload** (R5).
+   `hasMore`, **at most 5 pages**. If `hasMore` is still true after 5 pages, do a **full reload** (R5, R-P5).
 3. Fetch the conversation view (`GET …/conversations/{id}`) and set `knownVersion` from it: conversation events have no
    catch-up endpoint, so the view is how missed status, archive and assignment changes are reconciled (master spec
-   10.4 step 3: "cursor/version").
+   10.4 step 3: "cursor/version"; R-P5).
 4. Apply the buffered events by the rules below; the client is caught up when `lastContiguous` is at least the highest
    `sequence` seen on the channel.
 
@@ -155,7 +160,7 @@ State per open conversation (`createConversationSync` in `libs/chat-client`, Pla
 |---|---|
 | any | `eventId` already seen → drop. Unknown `eventType` or unknown fields → ignore (R15). |
 | `message.created` with `sequence = s` | `s ≤ lastContiguous` → drop (duplicate). `s = lastContiguous + 1` → apply, then advance (SI-6: never before the apply succeeded). `s > lastContiguous + 1` → keep it buffered and reconcile (gap). An own message that arrives before its `POST` response is matched to the pending bubble by `clientMessageId` and rendered once (`liveEventBeforeSendResponseRendersOnce`). |
-| `conversation.created` / `conversation.updated` with `version = v` | `v ≤ knownVersion` → drop. `v = knownVersion + 1` while caught up → apply the view (keep the per-caller `unreadCount` and `agentOnline` from the last `GET`). `v > knownVersion + 1`, or any conversation event while not caught up → refetch the conversation view (R3). |
+| `conversation.created` / `conversation.updated` with `version = v` | `v ≤ knownVersion` → drop. `v = knownVersion + 1` while caught up → apply the view (keep the per-caller `unreadCount` and `agentOnline` from the last `GET`). `v > knownVersion + 1`, or any conversation event while not caught up → refetch the conversation view (R3, R-P5). The event's `assignment` holds only `state` and `agentId` (R-P3): the dashboard refetches the agent view of the conversation it has open to show reason and explanation. |
 | `typing` | apply to the typing indicator with a 5 s receiver timeout; never buffered, never reconciled, never counted. |
 | an apply that throws | full reload of that conversation (SI-6). |
 
@@ -196,7 +201,7 @@ short-gap optimisation only. **Existing:** the engine is the in-memory default, 
 |---|---|---|
 | Republished outbox event (same `eventId`) | seen-`eventId` set | dropped |
 | Recovery replay overlapping the API catch-up | `sequence ≤ lastContiguous`; message `id` merge (`mergeMessages`) | dropped |
-| Same event on the conversation and the inbox channel | seen-`eventId` set per client | applied once per view (thread, list) |
+| Same event on the conversation and the inbox channel | seen-`eventId` set per view (inbox list, open thread) | applied once per view |
 | Own message event before the `POST` response | `clientMessageId` on the pending bubble | one bubble |
 | Client retry of a send | server: idempotency key (D5) | one row, 200 replay |
 | Stale or repeated conversation event | `version ≤ knownVersion` | dropped |
