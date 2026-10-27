@@ -793,6 +793,109 @@ paths:
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
+  /api/v1/admin/retention/purge:
+    post:
+      operationId: runRetentionPurge
+      summary: Dry run or execute a bounded retention purge
+      description: LOCAL POC — NOT REAL AUTHENTICATION; local-dev operator API.
+      tags: [platform]
+      security: [{ AdminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PurgeRequest' }
+      responses:
+        '200':
+          description: The purge run (dry runs included).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurgeRunView' }
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/v1/admin/retention/runs/{runId}:
+    parameters:
+      - name: runId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getRetentionRun
+      summary: One purge run
+      tags: [platform]
+      security: [{ AdminToken: [] }]
+      responses:
+        '200':
+          description: The run.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurgeRunView' }
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/v1/admin/retention/policies/{tenantId}:
+    parameters:
+      - name: tenantId
+        in: path
+        required: true
+        schema: { type: string }
+    put:
+      operationId: updateRetentionPolicy
+      summary: Set a tenant's retention policy and legal hold
+      tags: [platform]
+      security: [{ AdminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RetentionPolicyRequest' }
+      responses:
+        '200':
+          description: The stored policy.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetentionPolicyView' }
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/v1/admin/tenants:
+    post:
+      operationId: seedTenant
+      summary: Create or update a tenant with its inbox and agents, then seed the allocation service
+      tags: [platform]
+      security: [{ AdminToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdminTenantRequest' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminTenantView' }
+        '200':
+          description: The tenant already existed and was updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminTenantView' }
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/v1/status:
     get:
       operationId: getStatus
@@ -1078,6 +1181,80 @@ components:
         displayName: { type: string }
         availability: { type: string, enum: [ONLINE, AWAY, OFFLINE] }
         lastHeartbeatAt: { type: [string, 'null'], format: date-time }
+    PurgeRequest:
+      type: object
+      additionalProperties: false
+      required: [tenantId]
+      properties:
+        tenantId: { type: string }
+        dryRun: { type: boolean, default: false }
+        cutoff: { type: [string, 'null'], format: date-time }
+        batchSize: { type: integer, minimum: 1, maximum: 500, default: 50 }
+        maxBatches: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+    PurgeRunView:
+      type: object
+      additionalProperties: false
+      required: [id, tenantId, dryRun, cutoff, status, conversationsExamined, messagesDeleted, attachmentsDeleted,
+                 cursorsDeleted, batches, startedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string }
+        dryRun: { type: boolean }
+        cutoff: { type: string, format: date-time }
+        status: { type: string, enum: [RUNNING, COMPLETED, FAILED] }
+        conversationsExamined: { type: integer }
+        messagesDeleted: { type: integer }
+        attachmentsDeleted: { type: integer }
+        cursorsDeleted: { type: integer }
+        batches: { type: integer }
+        lastError: { type: [string, 'null'] }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: [string, 'null'], format: date-time }
+    RetentionPolicyRequest:
+      type: object
+      additionalProperties: false
+      required: [resolvedRetentionDays]
+      properties:
+        resolvedRetentionDays: { type: integer, minimum: 1 }
+        legalHold: { type: boolean, default: false }
+    RetentionPolicyView:
+      type: object
+      additionalProperties: false
+      required: [tenantId, resolvedRetentionDays, legalHold]
+      properties:
+        tenantId: { type: string }
+        resolvedRetentionDays: { type: integer }
+        legalHold: { type: boolean }
+    AdminTenantRequest:
+      type: object
+      additionalProperties: false
+      required: [id, name, widgetKey, queueId]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        widgetKey: { type: string }
+        queueId: { type: string }
+        agents:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, displayName]
+            properties:
+              id: { type: string }
+              displayName: { type: string }
+              maxActiveAssignments: { type: integer, minimum: 0 }
+    AdminTenantView:
+      type: object
+      additionalProperties: false
+      required: [id, name, inboxId, widgetKey, queueId, agents]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        inboxId: { type: string, format: uuid }
+        widgetKey: { type: string }
+        queueId: { type: string }
+        agents: { type: integer }
     OutboxEventView:
       type: object
       additionalProperties: false
