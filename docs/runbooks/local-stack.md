@@ -9,6 +9,13 @@ pnpm stack:up                                     # or: full container mode (inf
 
 `--wait` returns non-zero if any service fails its health check or Flyway exits non-zero.
 
+## Allocation service (local POC)
+
+`docker compose up -d --wait allocation-postgres allocation-service` starts the allocation engine on
+`http://localhost:8081` with its own PostgreSQL on 5433. Logs: `docker compose logs -f allocation-service`.
+The backend seeds tenant `tenant-local`, queue `support`, agent `agentbob` and policy `local-round-robin` on startup
+(retrying every 10 s for up to 5 minutes). The volume `allocation-postgres-data` is removed only by the DEV-ONLY reset
+below. If `ALLOCATION_DB_PASSWORD` is missing, run `scripts/dev-setup.ps1`.
 ## Inspect
 
 ```powershell

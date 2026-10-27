@@ -38,6 +38,52 @@ services:
         condition: service_healthy
     restart: 'no'
 
+  allocation-postgres:
+    image: postgres:18.6-alpine3.24
+    environment:
+      POSTGRES_DB: allocation
+      POSTGRES_USER: allocation
+      POSTGRES_PASSWORD: ${ALLOCATION_DB_PASSWORD:?run scripts/dev-setup.ps1 to create .env}
+    ports:
+      - '127.0.0.1:${ALLOCATION_DB_HOST_PORT:-5433}:5432'
+    volumes:
+      - allocation-postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U allocation -d allocation']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  allocation-service:
+    build:
+      context: ${ALLOCATION_ENGINE_DIR:-../RESEARCH/Allocationservice-research/allocation-engine}
+      dockerfile: Dockerfile
+    image: chat-platform/allocation-service:local
+    environment:
+      ALLOCATION_DB_URL: jdbc:postgresql://allocation-postgres:5432/allocation
+      ALLOCATION_DB_USER: allocation
+      ALLOCATION_DB_PASSWORD: ${ALLOCATION_DB_PASSWORD:?run scripts/dev-setup.ps1}
+      ALLOCATION_PORT: '8080'
+      ALLOCATION_BIND_ADDRESS: 0.0.0.0
+      ALLOCATION_DISPATCHER_ENABLED: 'true'
+      ALLOCATION_DISPATCHER_DELAY: 2s
+      ALLOCATION_SEED_DEMO: 'false'
+      ALLOCATION_FEATURE_LEVEL: operations
+      ALLOCATION_CORS_ORIGINS: http://localhost:3000
+      ALLOCATION_UI_DIST: 'classpath:/static/'
+    ports:
+      - '127.0.0.1:${ALLOCATION_HOST_PORT:-8081}:8080'
+    depends_on:
+      allocation-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:8080/actuator/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+    restart: unless-stopped
   centrifugo:
     image: centrifugo/centrifugo:v6.10.2
     command: centrifugo --config=/centrifugo/config.json
@@ -141,6 +187,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  allocation-postgres-data:
   postgres-data:
   prometheus-data:
   tempo-data:

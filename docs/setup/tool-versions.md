@@ -75,3 +75,9 @@ GitHub Actions used: `actions/checkout@v7`, `actions/setup-node@v7`, `actions/se
    with the OpenTelemetry SDK version Boot manages (`spring-boot-dependencies` → `opentelemetry.version`).
 3. Images: change the tag in the Compose file / Dockerfile, run `pnpm verify`, update this table.
 4. Never use `latest`; record the new verification date here.
+
+## Allocation service (Plan 04)
+
+- Image chat-platform/allocation-service:local, built from `../RESEARCH/Allocationservice-research/allocation-engine` (Temurin 25.0.4.1_1, Spring Boot 4.1.2, same as the backend).
+- PostgreSQL postgres:18.6-alpine3.24 (llocation-postgres, host port 5433), feature level operations, dispatcher sweep 2 s.
+- docker compose config -q and the apps overlay both validate; the image build itself is not part of the repo (needs the sibling checkout).
