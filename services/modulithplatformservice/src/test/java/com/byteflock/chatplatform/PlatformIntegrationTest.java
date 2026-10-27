@@ -5,6 +5,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -27,6 +28,7 @@ import tools.jackson.databind.json.JsonMapper;
  */
 @SpringBootTest
 @AutoConfigureMockMvc
+@Import(TestClockConfiguration.class)
 @ActiveProfiles("it")
 @Testcontainers(disabledWithoutDocker = true)
 public abstract class PlatformIntegrationTest {
@@ -48,6 +50,10 @@ public abstract class PlatformIntegrationTest {
 
 	@Autowired
 	protected JdbcClient jdbc;
+
+	/** Controllable time for outbox backoff, leases and typing intervals. */
+	@Autowired
+	protected TestClock testClock;
 
 	protected final JsonMapper json = JsonMapper.builder().build();
 
@@ -87,6 +93,7 @@ public abstract class PlatformIntegrationTest {
 				""").update();
 		CENTRIFUGO.requests.clear();
 		CENTRIFUGO.reset();
+		this.testClock.reset();
 	}
 
 	protected JsonNode body(MvcTestResult result) {
