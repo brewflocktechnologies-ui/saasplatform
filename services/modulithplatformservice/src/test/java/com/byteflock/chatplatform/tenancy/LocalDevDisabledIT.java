@@ -33,4 +33,8 @@ class LocalDevDisabledIT extends PlatformIntegrationTest {
 			.exchange()).hasStatus(404);
 	}
 
+	@org.springframework.test.context.DynamicPropertySource
+	static void localDevDisabled(org.springframework.test.context.DynamicPropertyRegistry registry) {
+		registry.add("app.local-dev.enabled", () -> "false");
+	}
 }

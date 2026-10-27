@@ -68,7 +68,7 @@ describe('event types match the committed JSON Schemas', () => {
       conversationId: '019a0000-0000-7000-8000-000000000001',
       message: { ...msg('019a0000-0000-7000-8000-0000000000aa', '2026-10-25T10:00:00Z', 'hi') },
     };
-    const validate = ajv.getSchema('https://schemas.chat-platform.local/chat/message-created.v1.schema.json');
+    const validate = ajv.getSchema('https://schemas.chat-platform.local/chat/demo-message-created.v1.schema.json');
     expect(validate?.(event), JSON.stringify(validate?.errors)).toBe(true);
     expect(validate?.({ ...event, message: { ...event.message, body: '' } })).toBe(false);
   });
