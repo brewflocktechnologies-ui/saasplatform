@@ -2,6 +2,8 @@ package com.byteflock.chatplatform.conversation.internal;
 
 import java.util.UUID;
 
+import com.byteflock.chatplatform.conversation.AssignMode;
+import com.byteflock.chatplatform.conversation.AssignRequest;
 import com.byteflock.chatplatform.conversation.CommandRequest;
 import com.byteflock.chatplatform.conversation.ConversationView;
 import com.byteflock.chatplatform.conversation.MessagePage;
@@ -21,6 +23,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -42,17 +45,20 @@ class AgentConversationController {
 
 	private final ReadCursorService readCursors;
 
+	private final AssignmentService assignments;
+
 	private final RateLimiter rateLimiter;
 
 	private final int messagesPerMinute;
 
 	AgentConversationController(ConversationService conversations, MessageService messages, HistoryService history,
-			ReadCursorService readCursors, RateLimiter rateLimiter,
+			ReadCursorService readCursors, AssignmentService assignments, RateLimiter rateLimiter,
 			@Value("${app.rate-limits.messages-per-minute}") int messagesPerMinute) {
 		this.conversations = conversations;
 		this.messages = messages;
 		this.history = history;
 		this.readCursors = readCursors;
+		this.assignments = assignments;
 		this.rateLimiter = rateLimiter;
 		this.messagesPerMinute = messagesPerMinute;
 	}
@@ -127,11 +133,18 @@ class AgentConversationController {
 		return this.conversations.unarchive(caller, conversationId, request);
 	}
 
-	/** Assignment is implemented by Plan 04; until then the route answers 501 {@code NOT_IMPLEMENTED}. */
+	/** Claim, auto-assign or reassign through the allocation service; requires an Idempotency-Key (1..128 chars). */
 	@PostMapping("/{conversationId}/assign")
 	@RequiresPrincipal(PrincipalType.AGENT)
-	ResponseEntity<Void> assign(Caller caller, @PathVariable UUID conversationId) {
-		throw new ResponseStatusException(HttpStatus.NOT_IMPLEMENTED);
+	ConversationView assign(Caller caller, @PathVariable UUID conversationId,
+			@RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+			@RequestBody(required = false) AssignRequest request) {
+		if (idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.length() > 128) {
+			throw new IllegalArgumentException("Idempotency-Key header must be 1 to 128 characters");
+		}
+		AssignMode mode = (request != null && request.mode() != null) ? request.mode() : AssignMode.AUTO;
+		Long expectedVersion = (request != null) ? request.expectedVersion() : null;
+		return this.assignments.assign(caller, conversationId, mode, expectedVersion, idempotencyKey.trim());
 	}
 
 	private void enforceMessageLimit(Caller caller) {

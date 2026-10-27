@@ -27,6 +27,7 @@ class StatusControllerTests {
 	void reportsUpWhenAllDependenciesAreUp() {
 		given(this.checks.database()).willReturn(DependencyStatus.up("schema version 1"));
 		given(this.checks.centrifugo()).willReturn(DependencyStatus.up("health endpoint OK"));
+		given(this.checks.allocation()).willReturn(DependencyStatus.up("health endpoint OK"));
 
 		assertThat(this.mvc.get().uri("/api/v1/status")).hasStatusOk()
 			.bodyJson()
@@ -41,6 +42,7 @@ class StatusControllerTests {
 	void reportsDegradedWithoutLeakingDetailsWhenDatabaseIsDown() {
 		given(this.checks.database()).willReturn(DependencyStatus.down("database unreachable or not migrated"));
 		given(this.checks.centrifugo()).willReturn(DependencyStatus.up("health endpoint OK"));
+		given(this.checks.allocation()).willReturn(DependencyStatus.up("health endpoint OK"));
 
 		assertThat(this.mvc.get().uri("/api/v1/status")).hasStatusOk()
 			.bodyJson()
@@ -54,6 +56,7 @@ class StatusControllerTests {
 	void allowsConfiguredLocalOriginOnly() {
 		given(this.checks.database()).willReturn(DependencyStatus.up(null));
 		given(this.checks.centrifugo()).willReturn(DependencyStatus.up(null));
+		given(this.checks.allocation()).willReturn(DependencyStatus.up(null));
 
 		assertThat(this.mvc.get().uri("/api/v1/status").header("Origin", "http://localhost:3000"))
 			.hasHeader("Access-Control-Allow-Origin", "http://localhost:3000");

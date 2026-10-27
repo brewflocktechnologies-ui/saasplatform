@@ -1,5 +1,7 @@
 package com.byteflock.chatplatform.conversation.internal;
 
+import com.byteflock.chatplatform.assignment.AllocationRejectedException;
+import com.byteflock.chatplatform.assignment.AllocationUnavailableException;
 import com.byteflock.chatplatform.conversation.ConversationAccessDeniedException;
 import com.byteflock.chatplatform.conversation.ConversationConflictException;
 import com.byteflock.chatplatform.conversation.ConversationNotFoundException;
@@ -26,6 +28,16 @@ class ConversationExceptionHandler {
 		this.tracer = tracer;
 	}
 
+	@ExceptionHandler(AllocationRejectedException.class)
+	ProblemDetail allocationRejected(AllocationRejectedException ex) {
+		return Problems.of(HttpStatus.CONFLICT, "ALLOCATION_REJECTED", ex.code(), this.tracer.getIfAvailable());
+	}
+
+	@ExceptionHandler(AllocationUnavailableException.class)
+	ProblemDetail allocationUnavailable(AllocationUnavailableException ex) {
+		return Problems.of(HttpStatus.SERVICE_UNAVAILABLE, "ALLOCATION_UNAVAILABLE",
+				"The allocation service is unavailable.", this.tracer.getIfAvailable());
+	}
 	@ExceptionHandler(ConversationNotFoundException.class)
 	ProblemDetail notFound(ConversationNotFoundException ex) {
 		return Problems.of(HttpStatus.NOT_FOUND, "NOT_FOUND", "The conversation does not exist.",

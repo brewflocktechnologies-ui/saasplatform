@@ -270,15 +270,15 @@ class ConversationApiIT extends PlatformIntegrationTest {
 	}
 
 	@Test
-	void assignIs501UntilPlan04() {
+	void assignWithoutIdempotencyKeyIs400() {
 		ConversationTestData.Fixture fixture = this.data.seed();
 		UUID conversation = this.data.start(this.conversations, fixture);
 
 		MvcTestResult result = post("/api/v1/agent/conversations/" + conversation + "/assign",
 				agentToken(fixture.tenantId()), Map.of("mode", "CLAIM"));
 
-		assertThat(result).hasStatus(501);
-		assertThat(body(result).get("code").asString()).isEqualTo("NOT_IMPLEMENTED");
+		assertThat(result).hasStatus(400);
+		assertThat(body(result).get("code").asString()).isEqualTo("VALIDATION_FAILED");
 	}
 
 	private String agentToken(String tenantId) {

@@ -949,10 +949,11 @@ components:
           format: date-time
         dependencies:
           type: object
-          required: [database, centrifugo]
+          required: [database, centrifugo, allocation]
           properties:
             database: { $ref: '#/components/schemas/DependencyStatus' }
             centrifugo: { $ref: '#/components/schemas/DependencyStatus' }
+            allocation: { $ref: '#/components/schemas/DependencyStatus' }
           additionalProperties:
             $ref: '#/components/schemas/DependencyStatus'
     BootstrapRecord:
@@ -1061,6 +1062,22 @@ components:
           type: array
           items: { $ref: '#/components/schemas/MessageView' }
         hasMore: { type: boolean }
+    PresenceRequest:
+      type: object
+      additionalProperties: false
+      required: [availability]
+      properties:
+        availability: { type: string, enum: [ONLINE, AWAY, OFFLINE] }
+    AgentMeView:
+      type: object
+      additionalProperties: false
+      required: [agentId, tenantId, displayName, availability, lastHeartbeatAt]
+      properties:
+        agentId: { type: string }
+        tenantId: { type: string }
+        displayName: { type: string }
+        availability: { type: string, enum: [ONLINE, AWAY, OFFLINE] }
+        lastHeartbeatAt: { type: [string, 'null'], format: date-time }
     OutboxEventView:
       type: object
       additionalProperties: false

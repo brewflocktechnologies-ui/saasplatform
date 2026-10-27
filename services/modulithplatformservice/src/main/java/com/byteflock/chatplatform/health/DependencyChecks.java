@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import com.byteflock.chatplatform.assignment.AllocationClient;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -23,11 +24,15 @@ class DependencyChecks {
 
 	private final URI centrifugoHealthUrl;
 
+	private final AllocationClient allocation;
+
 	private final HttpClient http = HttpClient.newBuilder().connectTimeout(TIMEOUT).build();
 
-	DependencyChecks(JdbcClient jdbc, @Value("${app.centrifugo.url}") URI centrifugoUrl) {
+	DependencyChecks(JdbcClient jdbc, @Value("${app.centrifugo.url}") URI centrifugoUrl,
+			AllocationClient allocation) {
 		this.jdbc = jdbc;
 		this.centrifugoHealthUrl = centrifugoUrl.resolve("/health");
+		this.allocation = allocation;
 	}
 
 	DependencyStatus database() {
@@ -43,6 +48,11 @@ class DependencyChecks {
 			log.warn("Database status check failed: {}", ex.getClass().getSimpleName());
 			return DependencyStatus.down("database unreachable or not migrated");
 		}
+	}
+
+	DependencyStatus allocation() {
+		return this.allocation.healthy() ? DependencyStatus.up("health endpoint OK")
+				: DependencyStatus.down("allocation service unreachable");
 	}
 
 	DependencyStatus centrifugo() {

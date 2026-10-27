@@ -57,13 +57,15 @@ public class ConversationService {
 
 	private final TenantDirectory directory;
 
+	private final PresenceService presence;
+
 	private final Clock clock;
 
 	private final int inboxPageMax;
 
 	ConversationService(TransactionTemplate tx, ConversationAccess access, ConversationRepository conversations,
 			ParticipantRepository participants, StateEventRepository stateEvents, ConversationLifecycle lifecycle,
-			OutboxAppender outbox, ObjectMapper mapper, TenantDirectory directory, Clock clock,
+			OutboxAppender outbox, ObjectMapper mapper, TenantDirectory directory, PresenceService presence, Clock clock,
 			@Value("${app.limits.inbox-page-max}") int inboxPageMax) {
 		this.tx = tx;
 		this.access = access;
@@ -74,6 +76,7 @@ public class ConversationService {
 		this.outbox = outbox;
 		this.mapper = mapper;
 		this.directory = directory;
+		this.presence = presence;
 		this.clock = clock;
 		this.inboxPageMax = inboxPageMax;
 	}
@@ -119,7 +122,15 @@ public class ConversationService {
 
 	public ConversationView get(Caller caller, UUID conversationId) {
 		this.access.requireReadable(caller, conversationId);
-		return this.access.view(caller, conversationId);
+		ConversationView view = this.access.view(caller, conversationId);
+		if (!caller.isContact()) {
+			return view;
+		}
+		Boolean online = this.presence.agentOnline(caller.tenantId(), view.assignment().agentId());
+		return new ConversationView(view.id(), view.tenantId(), view.inboxId(), view.contactId(), view.contactDisplayName(),
+				view.status(), view.version(), view.lastSequence(), view.lastMessageAt(), view.lastMessagePreview(),
+				view.assignment(), view.resolvedAt(), view.archivedAt(), view.purgedAt(), view.createdAt(),
+				view.updatedAt(), view.unreadCount(), online);
 	}
 
 	/**
