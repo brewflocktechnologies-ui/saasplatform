@@ -45,7 +45,8 @@ Option 1 (overview D8, D9):
   `assignment_reason`, `assignment_explanation`) and the request bookkeeping. `AssignmentWorker` claims due rows with
   `FOR UPDATE SKIP LOCKED` and a lease, calls the engine outside any transaction, and projects the result in a new
   transaction guarded by an `assignment_state` precondition: `REQUESTED → dispatch`, `QUEUED → poll`,
-  `RELEASE_PENDING → resolve`, `REOPEN_PENDING → requeue REOPEN` (only `REQUESTED` rows dispatch, R-P1). Worker keys
+  `RELEASE_PENDING → resolve`, `REOPEN_PENDING → requeue REOPEN`, `FAILED → re-read` (every `failed-poll`, 60 s,
+  `findConversation` only; only `REQUESTED` rows dispatch, R-P1, R-P17). Worker keys
   are `assign:<conversationId>:<attempt>`, a new key per attempt. Setup errors count in `assignment_setup_failures`
   (R-P2); `RELEASE_PENDING` never fails (R-P14).
 - Archived conversations hold no capacity: archiving releases the assignment (`RELEASE_PENDING`), unarchiving an open
@@ -76,7 +77,8 @@ Option 1 (overview D8, D9):
   by re-seeding (the worker backs off on `TENANT_NOT_FOUND` for up to 30 consecutive setup errors). One inbox (queue) per
   tenant in MVP seeding (R-P12).
 - `/api/v1/status` reports the engine (`allocation`); `allocation.requests{operation, outcome}`; conversations in
-  `FAILED` are visible in the dashboard queue and need an agent's `/assign`.
+  `FAILED` are visible in the dashboard queue, are re-read every `failed-poll` (60 s) and can be retried with `/assign`
+  (R-P17).
 
 ## Evidence that would trigger a change
 

@@ -122,7 +122,7 @@ that stay `QUEUED` get `now + queued-poll`.
 | | | `QUEUED` | `QUEUED` (event `ASSIGNMENT_QUEUED`) |
 | | | `CANCELLED` | `FAILED` |
 | `FAILED` | `findConversation` only, every `failed-poll` (60 s); never `dispatch` (R-P17) | `ASSIGNED`, `ACCEPTED`, `ACTIVE` (the engine's sweep assigned it later) | `ASSIGNED`, agent from the record, `decisionId` null, reason `ALLOCATION_SWEEP` (event `ASSIGNED`) |
-| | | anything else (`QUEUED`, absent, `RESOLVED`, `CANCELLED`) or an engine error | stays `FAILED`, next re-read in `failed-poll`; no event, no `version` change |
+| | | anything else (`QUEUED`, absent, `RESOLVED`, `CANCELLED`) or an engine error | stays `FAILED`, next re-read in `failed-poll` (an engine error also reschedules to `failed-poll`, not to backoff, R-P20); no event, no `version` change |
 
 A `FAILED` projection can coexist with an engine `QUEUED` record (for example a rejected dispatch whose cause an
 operator then fixed): the engine's sweep assigns it later and the re-read above projects the result, so a `FAILED` row
@@ -133,7 +133,7 @@ Engine errors, for every claimed state (R-P2, R-P14, R-P15):
 
 | Error | Platform reaction |
 |---|---|
-| `AllocationUnavailableException` (connect or read timeout, 5xx) | state unchanged, `next = Backoff.next(now, attempts − 1, poll-delay, max-backoff, rng)`; no event |
+| `AllocationUnavailableException` (connect or read timeout, 5xx) | state unchanged, `next = Backoff.next(now, attempts − 1, poll-delay, max-backoff, rng)`; no event. Except a `FAILED` row being re-read, which stays `FAILED` and reschedules to `now + failed-poll` (R-P20); the same exception applies to every other error in this table. |
 | 409 `CONCURRENT_MODIFICATION`, 409 `IDEMPOTENCY_RACE` | transient: as unavailable. The next attempt uses the next key; the engine's conversation lock and one-active-assignment index make a repeated dispatch safe. |
 | 404 `TENANT_NOT_FOUND`, 404 `QUEUE_NOT_FOUND`, 409 `NO_ACTIVE_POLICY` (allocation side not seeded yet) | `assignment_setup_failures + 1`, state unchanged, backoff; at `max-setup-attempts` (30) → `FAILED` with that code (overview §7 B). `RELEASE_PENDING` only backs off (a 404 `TENANT_NOT_FOUND` on its `resolve` is confirmed by a read instead, see above, R-P17). |
 | any other 4xx (`FEATURE_DISABLED`, `IDEMPOTENCY_KEY_REUSED`, `INVALID_ID`, …) on `REQUESTED`, `QUEUED`, `REOPEN_PENDING` | `FAILED` with the code (event `ASSIGNMENT_FAILED`), WARN log (R-P10) |
@@ -154,7 +154,7 @@ Dispatch outcome table (A1; also used by `/assign`, section 5). Branch on `outco
 
 Visibility (R-P3): the projection's `decisionId`, `reason` and `explanation` are internal routing data. Contact callers
 and every `conversation.created`/`conversation.updated` payload see only `assignment.state` and `assignment.agentId`;
-the dashboard reads the rest with `GET /api/v1/agent/conversations/{id}` when an event changes the open conversation.
+the other fields are absent, not null (R-P21). The dashboard reads the rest with `GET /api/v1/agent/conversations/{id}` when an event changes the open conversation.
 
 **Limitation (R-P14):** `ASSIGNED` rows are not claimed, so nothing reconciles them in the background in the MVP. A
 change made directly in the allocation service (its workbench or API: a requeue, reassign or resolve there) is not
@@ -178,7 +178,8 @@ reflected in the platform until a platform command touches the conversation.
   `VALIDATION_FAILED`), passed through unchanged. One click is one key; a retry of the same click reuses it and gets the
   stored decision; a second click with a new key is answered like any lost claim: the engine says
   `CONVERSATION_NOT_ALLOCATABLE`, and `/assign` reads the record and answers 200 when the caller already holds the
-  conversation, else 409 (R-P17).
+  conversation, else 409 (R-P17). A repeated `CLAIM` by the agent who already holds the conversation is therefore an
+  idempotent 200 with the unchanged view (no write, no event, `version` unchanged), a different agent gets 409 (R-P19).
 - Worker keys (`assign:` prefix) and dashboard keys (random UUIDs) never coincide, so the engine's
   `IDEMPOTENCY_KEY_REUSED` cannot be triggered by design.
 
@@ -227,7 +228,9 @@ Order:
    first): the same read-and-project as step 4, then 200 with the agent view when the engine record is now assigned to
    the caller, else 409 `ALLOCATION_REJECTED` with detail `CONVERSATION_NOT_ALLOCATABLE`. A `FAILED` projection can
    coexist with an engine `QUEUED` record that the sweep later assigns (section 3), so this is also how `/assign`
-   repairs a stale `FAILED` (R-P17).
+   repairs a stale `FAILED` (R-P17). When the record is assigned to the caller who already holds the projection (a
+   repeated `CLAIM`), the view is returned unchanged; a different agent gets the 409 (R-P19). A move out of `FAILED` by
+   this projection (to `REQUESTED`) sets `assignment_next_attempt_at = now` (R-P20).
 6. `AllocationUnavailableException` → 503 `ALLOCATION_UNAVAILABLE`; any other engine rejection → 409
    `ALLOCATION_REJECTED` with the engine code in `detail`, projection unchanged.
 7. Success answers with the agent `ConversationView` (full assignment).

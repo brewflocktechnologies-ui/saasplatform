@@ -50,7 +50,7 @@ Centrifugo's own publication offset and epoch are never part of the application 
 | `eventType` | Channels | Durable (outbox) | `data` (R14) | Counter carried |
 |---|---|---|---|---|
 | `message.created` | conversation + inbox | yes | `{message: MessageView}` | `data.message.sequence` (R2) |
-| `conversation.created` | inbox | yes | `{conversation: ConversationView}` without `unreadCount` and `agentOnline`, and with `assignment` reduced to `state` and `agentId` (`decisionId`, `reason`, `explanation` null; R-P3) | `data.conversation.version` (R3) |
+| `conversation.created` | inbox | yes | `{conversation: ConversationView}` without `unreadCount` and `agentOnline`, and with `assignment` reduced to `state` and `agentId` (`decisionId`, `reason`, `explanation` absent, not null; R-P3, R-P21) | `data.conversation.version` (R3) |
 | `conversation.updated` | conversation + inbox | yes | `{conversation: …same reduced view…, change}` | `data.conversation.version` |
 | `typing` | conversation | no (direct publish) | `{participantType, participantId, typing}` | none |
 

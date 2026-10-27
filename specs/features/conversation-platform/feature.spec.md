@@ -9,7 +9,7 @@
   [ADR-0008](../../decisions/ADR-0008-tenant-isolation-and-local-identity.md), [ADR-0009](../../decisions/ADR-0009-allocation-service-integration.md)
 - **Design:** [system overview](../../../docs/architecture/system-overview.md) and the documents it indexes; plan set
   [00-overview](../../../docs/superpowers/plans/2026-10-27-conversation-platform-00-overview.md) (decisions `D1` to
-  `D20`, glossary §5; §8 there lists the rulings that changed the plans); rulings `R1` to `R16` and `R-P1` to `R-P17` in
+  `D20`, glossary §5; §8 there lists the rulings that changed the plans); rulings `R1` to `R16` and `R-P1` to `R-P21` in
   system-overview.md section 7.
 
 ## 1. Problem and desired outcome
@@ -252,16 +252,14 @@ presence without `heartbeatAt` (Plan 04, R-P4); `sync.ts` 5-page cap and version
 `FAILED` rows released on resolve and archive and re-read every 60 s, a missing tenant on release, and `/assign`
 reading the engine state after `CONVERSATION_NOT_ALLOCATABLE` (Plan 02 `LifecycleIT`, Plan 04
 `failedRowProjectsLaterSweepAssignment`, `resolveOfFailedReleasesThroughEngine`, `releasePendingTenantMissingBecomesNone`,
-`assignNotAllocatableProjectsEngineState`, R-P17); `RealtimeTokenIT.unknownConversationChannelIs404` (Plan 03 T3, R-P6).
+`assignNotAllocatableProjectsEngineState`, R-P17); `RealtimeTokenIT.unknownConversationChannelIs404` (Plan 03 T3, R-P6)
+and `inboxChannelOfOwnTenantUnknownIs404` (R-P18); `AssignmentApiIT.sameAgentReclaimIs200` (Plan 04 T4, R-P19);
+`contactViewHidesAssignmentInternals` asserting the hidden fields are absent (Plan 02 T4, R-P21).
 
 Design rules still without a named test (to add in the plan that owns the code):
 - `sync.ts`: a failed apply keeps the cursor and does a full reload (SI-6); an API head below `lastContiguous` does a
   full reload (SI-9 client side); the snapshot-plus-events property test over the three interleavings (SI-12)
   (Plan 06 T1).
-- `ChannelAuthorizer`: a subscription-token request for an unknown **inbox** id answers 404
-  ([tenant-security.md](../../../docs/architecture/tenant-security.md) section 5); Plan 03 T3 implements and tests only
-  the conversation case (`RealtimeTokenIT.unknownConversationChannelIs404`), because telling an unknown inbox from
-  another tenant's needs a second unfiltered statement that R-P6 does not allow. Open question for the plan owner.
 
 ## 9. Rollout, compatibility and rollback
 

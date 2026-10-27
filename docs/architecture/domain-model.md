@@ -182,7 +182,11 @@ section 3).
 
 Every move into `REQUESTED`, `RELEASE_PENDING` or `REOPEN_PENDING` also sets
 `assignment_next_attempt_at = GREATEST(assignment_next_attempt_at, :now)`: due at once, while a running worker lease is
-kept (Plan 02 T3).
+kept (Plan 02 T3). The one exception is a move out of `FAILED` (T1 and T5 to `RELEASE_PENDING`, T8 to
+`REOPEN_PENDING`, `/assign` to `REQUESTED`): it sets `assignment_next_attempt_at = :now`, because a `FAILED` row's time is
+the `failed-poll` schedule (up to 60 s ahead), not a worker lease, and `GREATEST` would delay the release or requeue by up
+to `failed-poll`. A `FAILED` re-read in flight at that moment cannot project over the new state: every projection
+carries an `assignment_state` precondition (R-P20).
 
 ### 5.4 `version`
 
@@ -226,8 +230,10 @@ Projection writes also upsert the `AGENT` participant on assignment and append `
 
 Visibility (R-P3): `AssignmentView` carries `state`, `agentId`, `decisionId`, `reason` and `explanation` only for agent
 callers (`GET /api/v1/agent/…`). For contact callers and in every `conversation.created` / `conversation.updated` event
-payload, `assignment` carries only `state` and `agentId`; `decisionId`, `reason` and `explanation` are null, because the
-conversation channel is shared with the visitor and allocation explanations describe internal routing.
+payload, `assignment` carries only `state` and `agentId`; `decisionId`, `reason` and `explanation` are absent (not
+null: `AssignmentView` is serialised without null fields for contacts, R-P21), because the conversation channel is shared
+with the visitor and allocation explanations describe internal routing. Agent responses keep the five fields (null when
+unknown).
 
 ## 7. Identifiers and time
 

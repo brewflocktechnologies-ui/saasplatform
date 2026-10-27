@@ -98,7 +98,7 @@ Tests: `ConversationApiIT.contactCannotReadAnotherInboxConversation`, `sameAgent
 `unknownConversationIs404ForParticipantsAnd403ForOthers`; `MessageWriteIT.nonParticipantContactIs403`,
 `crossTenantAgentIs403`; `HistoryIT.historyIsTenantScoped`.
 
-## 5. Channel authorization (`ChannelAuthorizer`, D14, R6)
+## 5. Channel authorization (`ChannelAuthorizer`, D14, R6, R-P18)
 
 | Requested channel | Contact | Agent |
 |---|---|---|
@@ -106,12 +106,14 @@ Tests: `ConversationApiIT.contactCannotReadAnotherInboxConversation`, `sameAgent
 | `chat:conversation:<id>` of another contact or inbox, same tenant | 403 | allowed |
 | `chat:conversation:<id>` of another tenant | 403 | 403 |
 | `chat:inbox:<ownTenant>:<inboxOfOwnTenant>` | 403 | allowed |
-| `chat:inbox:<tenantA>:<inboxOfTenantB>` (mismatched pair) or another tenant | 403 | 403 |
-| unknown conversation or inbox id | 404 (conversation: `RealtimeTokenIT.unknownConversationChannelIs404`, decided with the R-P6 probe; Plan 03 T3) | 404 (same) |
+| `chat:inbox:<otherTenant>:<any inbox id>` (the channel names a tenant other than the caller's) | 403 | 403, from the channel name alone, no lookup (R-P18) |
+| `chat:inbox:<ownTenant>:<unknown id, or an inbox of another tenant>` | 403 | 404 from the tenant-filtered inbox lookup; an unknown id and another tenant's inbox answer alike, so no existence is confirmed (R-P18) |
+| `chat:conversation:<id>` that does not exist | 404 (decided with the R-P6 probe) | 404 |
 | malformed (not exactly one of the two forms, uppercase UUID, extra segments) | 400 `VALIDATION_FAILED` | 400 |
 
 The browser cannot subscribe without a token (namespace option), cannot reuse a token for another channel (Centrifugo
-checks the `channel` claim; code 103), and cannot publish (client publish denied). Durable events reach Centrifugo only
+checks the `channel` claim; code 103), and cannot publish (client publish denied). Inbox channels need no probe: the channel name carries the tenant, and a CONTACT
+caller gets 403 for every inbox channel (R-P18). Durable events reach Centrifugo only
 from the backend with `CENTRIFUGO_HTTP_API_KEY`, which never reaches a browser. Tests: `RealtimeTokenIT` (every
 case above), contract `subscriptionTokenForAnotherChannelIsRejected`, E2E `nonParticipantCannotLoadHistoryOrSubscribe`.
 
@@ -163,7 +165,7 @@ origins in `client.allowed_origins` (a static list). **Existing:** the widget bu
 | Leaking data in errors or logs | problem details with `code`, no stack, SQL, token or body; logs without bodies, tokens or secrets | `ConversationApiIT.validationErrorsAreProblemJsonWithCode`, `LogHygieneTest` |
 | Enumerating ids | random UUID v7; 403/404 rule (section 4) | |
 | Admin misuse | admin API absent unless local-dev; constant-time token check; startup guard in production | `AdminApiIT`, `OutboxAdminIT.adminRoutesAbsentWhenLocalDevDisabled`, `LocalDevGuardTest` |
-| A visitor sees internal routing details | for contact callers and in every `conversation.created` / `conversation.updated` payload (the conversation channel is shared with the visitor), `assignment` carries only `state` and `agentId`; `decisionId`, `reason` and `explanation` are null and reach agents only through `GET /api/v1/agent/conversations/{id}` (R-P3) | Plan 02 view test and Plan 04 projection-event tests (R-P3 amendments) |
+| A visitor sees internal routing details | for contact callers and in every `conversation.created` / `conversation.updated` payload (the conversation channel is shared with the visitor), `assignment` carries only `state` and `agentId`; `decisionId`, `reason` and `explanation` are absent (not null, R-P21) and reach agents only through `GET /api/v1/agent/conversations/{id}` (R-P3) | Plan 02 view test and Plan 04 projection-event tests (R-P3 amendments) |
 
 Isolation is enforced in application SQL and tests; the database adds no guard in the MVP (no row-level security, no
 composite `(tenant_id, id)` foreign keys, R10). A missed predicate is therefore caught only by tests until the ADR-0008
