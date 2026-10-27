@@ -86,7 +86,7 @@ public abstract class PlatformIntegrationTest {
 				               platform.tenants
 				""").update();
 		CENTRIFUGO.requests.clear();
-		CENTRIFUGO.respond(200, "{\"result\":{}}");
+		CENTRIFUGO.reset();
 	}
 
 	protected JsonNode body(MvcTestResult result) {
