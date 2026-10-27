@@ -35,3 +35,14 @@ record ConversationFacts(long lastSequence, String tenantId, UUID inboxId, UUID 
 /** Keyset cursor of an inbox page: activity time of the last row plus its id, both descending. */
 record InboxCursor(OffsetDateTime activityAt, UUID id) {
 }
+
+/** A conversation claimed by the assignment worker: everything the orchestrator needs, read once. */
+record ClaimedAssignment(UUID id, String tenantId, UUID inboxId, UUID contactId, String queueId,
+		com.byteflock.chatplatform.conversation.ConversationStatus status,
+		com.byteflock.chatplatform.conversation.AssignmentState assignmentState, boolean archived,
+		OffsetDateTime leaseEnd, int attempts, int setupFailures) {
+}
+
+/** Re-read right before a create/dispatch call: if either changed since the claim, the row is skipped (R-P28). */
+record AssignmentGuard(boolean archived, com.byteflock.chatplatform.conversation.AssignmentState assignmentState) {
+}

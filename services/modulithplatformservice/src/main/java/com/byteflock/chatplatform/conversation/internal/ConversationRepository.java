@@ -2,6 +2,7 @@ package com.byteflock.chatplatform.conversation.internal;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -271,4 +272,103 @@ public class ConversationRepository {
 				row.purgedAt(), row.createdAt(), row.updatedAt(), unread, null);
 	}
 
+	// --- assignment worker (Plan 04) ---------------------------------------------------------------------------------
+
+	/**
+	 * Claims due rows for the assignment worker. Archived {@code REQUESTED}/{@code QUEUED}/{@code FAILED} rows are never
+	 * claimed (R-P13), while {@code RELEASE_PENDING} and {@code REOPEN_PENDING} are claimable archived or not. The claim is
+	 * bookkeeping: {@code version} does not change (R-P9).
+	 */
+	public List<ClaimedAssignment> claimDueAssignments(String workerId, int limit, OffsetDateTime now, Duration lease) {
+		return this.jdbc.sql("""
+				WITH due AS MATERIALIZED (
+				    SELECT c.id FROM conversations c
+				    WHERE ((c.assignment_state IN ('REQUESTED', 'QUEUED', 'FAILED') AND c.archived_at IS NULL)
+				           OR c.assignment_state IN ('RELEASE_PENDING', 'REOPEN_PENDING'))
+				      AND c.assignment_next_attempt_at IS NOT NULL
+				      AND c.assignment_next_attempt_at <= :now
+				    ORDER BY c.assignment_next_attempt_at
+				    LIMIT :limit
+				    FOR UPDATE SKIP LOCKED
+				)
+				UPDATE conversations c
+				SET assignment_next_attempt_at = :leaseEnd, assignment_attempts = assignment_attempts + 1
+				FROM due WHERE c.id = due.id
+				RETURNING c.id, c.tenant_id, c.inbox_id, c.contact_id, c.status, c.assignment_state, c.archived_at,
+				          c.assignment_next_attempt_at, c.assignment_attempts, c.assignment_setup_failures,
+				          (SELECT i.allocation_queue_id FROM inboxes i WHERE i.id = c.inbox_id) AS queue_id
+				""")
+			.param("now", now)
+			.param("limit", limit)
+			.param("leaseEnd", now.plus(lease))
+			.query((rs, row) -> new ClaimedAssignment(rs.getObject("id", UUID.class), rs.getString("tenant_id"),
+					rs.getObject("inbox_id", UUID.class), rs.getObject("contact_id", UUID.class),
+					rs.getString("queue_id"), ConversationStatus.valueOf(rs.getString("status")),
+					AssignmentState.valueOf(rs.getString("assignment_state")),
+					rs.getObject("archived_at", OffsetDateTime.class) != null,
+					rs.getObject("assignment_next_attempt_at", OffsetDateTime.class), rs.getInt("assignment_attempts"),
+					rs.getInt("assignment_setup_failures")))
+			.list();
+	}
+
+	/** Tenant-filtered re-read right before a create/dispatch call (R-P28). */
+	public Optional<AssignmentGuard> assignmentGuard(String tenantId, UUID id) {
+		return this.jdbc.sql("""
+				SELECT archived_at, assignment_state FROM conversations WHERE tenant_id = :tenantId AND id = :id
+				""")
+			.param("tenantId", tenantId)
+			.param("id", id)
+			.query((rs, row) -> new AssignmentGuard(rs.getObject("archived_at", OffsetDateTime.class) != null,
+					AssignmentState.valueOf(rs.getString("assignment_state"))))
+			.optional();
+	}
+
+	/**
+	 * Writes the assignment projection after the caller re-read the row under its lock. {@code bumpVersion} is true only
+	 * when the caller appends exactly one {@code conversation.updated} in the same transaction (R-P23).
+	 */
+	public int updateProjection(UUID id, String tenantId, AssignmentState target, String agentId, UUID decisionId,
+			String reason, String explanation, OffsetDateTime nextAttemptAt, int setupFailures, boolean bumpVersion,
+			OffsetDateTime now) {
+		return this.jdbc.sql("""
+				UPDATE conversations SET
+				    assignment_state = :state,
+				    assigned_agent_id = CASE WHEN :state = 'ASSIGNED' THEN :agentId ELSE NULL END,
+				    assignment_decision_id = CASE WHEN :state = 'ASSIGNED' THEN :decisionId ELSE NULL END,
+				    assignment_reason = :reason,
+				    assignment_explanation = :explanation,
+				    assignment_next_attempt_at = :nextAttemptAt,
+				    assignment_setup_failures = :setupFailures,
+				    version = version + :bump,
+				    updated_at = CASE WHEN :bump = 1 THEN :now ELSE updated_at END
+				WHERE id = :id AND tenant_id = :tenantId
+				""")
+			.param("state", target.name())
+			.param("agentId", agentId)
+			.param("decisionId", decisionId)
+			.param("reason", reason)
+			.param("explanation", explanation)
+			.param("nextAttemptAt", nextAttemptAt)
+			.param("setupFailures", setupFailures)
+			.param("bump", bumpVersion ? 1 : 0)
+			.param("now", now)
+			.param("id", id)
+			.param("tenantId", tenantId)
+			.update();
+	}
+
+	/** Counts one consecutive setup rejection (R-P2) and schedules the retry; returns the new counter. */
+	public int incrementSetupFailures(UUID id, String tenantId, OffsetDateTime nextAttemptAt) {
+		return this.jdbc.sql("""
+				UPDATE conversations SET assignment_setup_failures = assignment_setup_failures + 1,
+				       assignment_next_attempt_at = :nextAttemptAt
+				WHERE id = :id AND tenant_id = :tenantId
+				RETURNING assignment_setup_failures
+				""")
+			.param("nextAttemptAt", nextAttemptAt)
+			.param("id", id)
+			.param("tenantId", tenantId)
+			.query(Integer.class)
+			.single();
+	}
 }
