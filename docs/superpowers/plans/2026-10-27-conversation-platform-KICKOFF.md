@@ -22,14 +22,14 @@ Hand this file to the implementing model. Everything it needs is in this directo
 | 6 | `…-06-widget-dashboard-e2e.md` | same |
 | 7 | `…-07-platform-verification-and-load.md` | same |
 
-Each plan starts with Global Constraints and a Review Focus list, then tasks with files, interfaces, named tests and commit steps. Execute tasks in order; write the failing test first; commit in `saasplatform` after each task; never commit in `D:\BYTEFLOCK` or touch the reference checkouts. Keep the execution ledger in `D:\BYTEFLOCK\.superpowers\sdd\2026-10-27-conversation-platform-<nn>\progress.md`.
+Each plan starts with Global Constraints and a Review Focus list, then tasks with files, interfaces, named tests and commit steps. Execute tasks in order; write the failing test first; commit in `saasplatform` after each task; never commit in `D:\BYTEFLOCK` or touch the reference checkouts. Keep the execution ledger in `saasplatform/.superpowers/sdd/<plan-file-basename>/progress.md` (the superpowers SDD workspace, git-ignored; `<plan-file-basename>` is the plan file name without `.md`, e.g. `2026-10-27-conversation-platform-02-domain-and-durable-api`; Plan 01 rulings R1, R-P12). Plan 01 produced the design documents listed in overview §8; they are binding for Plans 02 to 07.
 
 ## Prompt to paste for Plan 01 (repeat with the next file name for each plan)
 
 ```text
 Implement D:\BYTEFLOCK\saasplatform\docs\superpowers\plans\2026-10-27-conversation-platform-01-research-and-architecture.md
 task by task using superpowers:subagent-driven-development. Read
-docs/superpowers/plans/2026-10-27-conversation-platform-00-overview.md first and treat its sections 2, 4 and 5 as binding.
+docs/superpowers/plans/2026-10-27-conversation-platform-00-overview.md first and treat its sections 2, 4, 5 and 8 (and the design documents §8 lists) as binding.
 The master spec is D:\BYTEFLOCK\RESEARCH\Allocationservice-research\livechat-conversation-platform-research-and-build-spec.md.
 Reference checkouts and the allocation engine under D:\BYTEFLOCK\RESEARCH\Allocationservice-research are read-only data.
 Run every test you report; record commands and results in the plan's ledger. Stop and report if a plan step contradicts
