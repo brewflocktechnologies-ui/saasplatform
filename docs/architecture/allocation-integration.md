@@ -87,7 +87,7 @@ bounded batch, commits, then `AssignmentOrchestrator` processes each row outside
 UPDATE conversations
    SET assignment_next_attempt_at = :now + :lease, assignment_attempts = assignment_attempts + 1
  WHERE id IN (SELECT id FROM conversations
-               WHERE ((assignment_state IN ('REQUESTED', 'QUEUED') AND archived_at IS NULL)
+               WHERE ((assignment_state IN ('REQUESTED', 'QUEUED', 'FAILED') AND archived_at IS NULL)
                       OR assignment_state IN ('RELEASE_PENDING', 'REOPEN_PENDING'))
                  AND assignment_next_attempt_at <= :now
                ORDER BY assignment_next_attempt_at
@@ -96,9 +96,12 @@ UPDATE conversations
 RETURNING …
 ```
 
-The index is `ix_conversations_assignment_due`. The worker never dispatches an archived row (R-P13): archiving moves
-`REQUESTED` and `QUEUED` rows to `RELEASE_PENDING`, and the claim excludes archived `REQUESTED`/`QUEUED` rows as a
-second guard. A claim is worker bookkeeping and does not change `version` (R-P9).
+The index is `ix_conversations_assignment_due`; its predicate includes `FAILED`. The worker never dispatches an archived
+row (R-P13): archiving moves `REQUESTED`, `QUEUED`, `ASSIGNED`, `REOPEN_PENDING` and `FAILED` rows to `RELEASE_PENDING`
+(resolving does the same, R-P17), and the claim excludes archived `REQUESTED`/`QUEUED`/`FAILED` rows as a second guard.
+A claim is worker bookkeeping and does not change `version` (R-P9). A row entering `FAILED`, and each re-read that
+leaves it `FAILED`, gets `assignment_next_attempt_at = now + app.assignment.failed-poll` (60 s, R-P17); `QUEUED` rows
+that stay `QUEUED` get `now + queued-poll`.
 
 | Claimed state | Call | Allocation answer | New state (event) |
 |---|---|---|---|
@@ -112,12 +115,19 @@ second guard. A claim is worker bookkeeping and does not change `version` (R-P9)
 | | | absent | `REQUESTED` (the allocation side lost the record, F2: alert) |
 | | | `RESOLVED` / `CANCELLED` | as for `REQUESTED` |
 | `RELEASE_PENDING` | `resolve` (V3) | 200 | `NONE`, agent and decision cleared (state event `RELEASED`, no realtime event) |
-| | | 404 `CONVERSATION_NOT_FOUND` or 409 `CONVERSATION_CLOSED` | confirm with `findConversation` (research section 1, item 6): `RESOLVED`, `CANCELLED` or absent → `NONE` as above; any other status → stays `RELEASE_PENDING` with backoff and a WARN log |
+| | | any 404 (`CONVERSATION_NOT_FOUND`, `TENANT_NOT_FOUND`) or 409 `CONVERSATION_CLOSED` | confirm with `findConversation` (research section 1, item 6; a missing tenant also answers 404 there, which reads as absent): `RESOLVED`, `CANCELLED` or absent → `NONE` as above; any other status → stays `RELEASE_PENDING` with backoff and a WARN log (R-P17) |
 | `REOPEN_PENDING` | `findConversation` | absent | `REQUESTED` |
 | | | `RESOLVED` | `requeueReopen` (V4 `{reason: REOPEN, excludePreviousAgent: false}`; 409 `INVALID_REQUEUE` counts as done only if a `findConversation` shows `QUEUED`) → `REQUESTED` |
 | | | `ASSIGNED`, `ACCEPTED`, `ACTIVE` (the release never reached the engine) | `ASSIGNED`, same agent, reason `REOPEN_KEPT_AGENT` (event `ASSIGNED`) |
 | | | `QUEUED` | `QUEUED` (event `ASSIGNMENT_QUEUED`) |
 | | | `CANCELLED` | `FAILED` |
+| `FAILED` | `findConversation` only, every `failed-poll` (60 s); never `dispatch` (R-P17) | `ASSIGNED`, `ACCEPTED`, `ACTIVE` (the engine's sweep assigned it later) | `ASSIGNED`, agent from the record, `decisionId` null, reason `ALLOCATION_SWEEP` (event `ASSIGNED`) |
+| | | anything else (`QUEUED`, absent, `RESOLVED`, `CANCELLED`) or an engine error | stays `FAILED`, next re-read in `failed-poll`; no event, no `version` change |
+
+A `FAILED` projection can coexist with an engine `QUEUED` record (for example a rejected dispatch whose cause an
+operator then fixed): the engine's sweep assigns it later and the re-read above projects the result, so a `FAILED` row
+does not need an agent's `/assign` to recover (R-P17). The re-read never projects `QUEUED` or dispatches; `/assign`
+(section 5) does.
 
 Engine errors, for every claimed state (R-P2, R-P14, R-P15):
 
@@ -125,7 +135,7 @@ Engine errors, for every claimed state (R-P2, R-P14, R-P15):
 |---|---|
 | `AllocationUnavailableException` (connect or read timeout, 5xx) | state unchanged, `next = Backoff.next(now, attempts − 1, poll-delay, max-backoff, rng)`; no event |
 | 409 `CONCURRENT_MODIFICATION`, 409 `IDEMPOTENCY_RACE` | transient: as unavailable. The next attempt uses the next key; the engine's conversation lock and one-active-assignment index make a repeated dispatch safe. |
-| 404 `TENANT_NOT_FOUND`, 404 `QUEUE_NOT_FOUND`, 409 `NO_ACTIVE_POLICY` (allocation side not seeded yet) | `assignment_setup_failures + 1`, state unchanged, backoff; at `max-setup-attempts` (30) → `FAILED` with that code (overview §7 B). `RELEASE_PENDING` only backs off. |
+| 404 `TENANT_NOT_FOUND`, 404 `QUEUE_NOT_FOUND`, 409 `NO_ACTIVE_POLICY` (allocation side not seeded yet) | `assignment_setup_failures + 1`, state unchanged, backoff; at `max-setup-attempts` (30) → `FAILED` with that code (overview §7 B). `RELEASE_PENDING` only backs off (a 404 `TENANT_NOT_FOUND` on its `resolve` is confirmed by a read instead, see above, R-P17). |
 | any other 4xx (`FEATURE_DISABLED`, `IDEMPOTENCY_KEY_REUSED`, `INVALID_ID`, …) on `REQUESTED`, `QUEUED`, `REOPEN_PENDING` | `FAILED` with the code (event `ASSIGNMENT_FAILED`), WARN log (R-P10) |
 | any other 4xx on `RELEASE_PENDING` | stays `RELEASE_PENDING` with backoff and a WARN log carrying the code; never `FAILED`, because the capacity must eventually be released |
 | any successful engine response | `assignment_setup_failures = 0` |
@@ -137,7 +147,7 @@ Dispatch outcome table (A1; also used by `/assign`, section 5). Branch on `outco
 | `ASSIGNED` | `ASSIGNED`: agent, `decisionId`, reason, explanation (event `ASSIGNED`) | 200 view, `assignment.state = ASSIGNED` |
 | `QUEUED_NO_ELIGIBLE_AGENT`, `QUEUED_CAPACITY_EXHAUSTED`, `QUEUED_NO_AVAILABLE_AGENT`, `QUEUED_MANUAL_SELECTION`, `QUEUED_FEATURE_DISABLED` | `QUEUED`, reason = outcome, next poll in 5 s (event `ASSIGNMENT_QUEUED` on entering `QUEUED`). The last two need an operator or a claim; they stay visible. | 200 view, `assignment.state = QUEUED` with the reason (overview §7 F) |
 | `CONFLICT_RETRYABLE` (not stored by the engine) | stays `REQUESTED`, due after `poll-delay`; the next attempt dispatches with the next key (R-P1) | 409 `ALLOCATION_REJECTED`, detail `CONFLICT_RETRYABLE`: retry with the same `Idempotency-Key` (R-P10) |
-| `REJECTED_INVALID_INPUT` + `CONVERSATION_NOT_ALLOCATABLE` | reconcile: `findConversation`; assigned → `ASSIGNED` (`ALLOCATION_SWEEP`), anything else → `FAILED` | 409 `ALLOCATION_REJECTED`, projection unchanged (`AssignmentApiIT.doubleClaimIsRejectedConsistently`) |
+| `REJECTED_INVALID_INPUT` + `CONVERSATION_NOT_ALLOCATABLE` | reconcile: `findConversation`; assigned → `ASSIGNED` (`ALLOCATION_SWEEP`), anything else → `FAILED` | `findConversation`, project the engine state (section 5 step 4), then 200 when it is now assigned to the caller, else 409 `ALLOCATION_REJECTED` (`AssignmentApiIT.doubleClaimIsRejectedConsistently`, `assignNotAllocatableProjectsEngineState`; R-P17) |
 | `REJECTED_INVALID_INPUT` with another reason (on a claim typically `AGENT_NOT_FOUND`: the claimer is not in the conversation's queue) | `FAILED`, reason = outcome (event `ASSIGNMENT_FAILED`) | 409 `ALLOCATION_REJECTED`, projection unchanged (R-P14) |
 | `CLAIM_REJECTED` (claim only) | n/a | 409 `ALLOCATION_REJECTED` with `reasonCodes`, projection unchanged (R-P14) |
 | `FAILED_INTERNAL`, `SKIPPED_POLICY_DISABLED`, `NO_WAITING_CONVERSATION` | `FAILED`, reason = outcome (event `ASSIGNMENT_FAILED`) | `FAILED` projection, 409 `ALLOCATION_REJECTED` |
@@ -166,7 +176,9 @@ reflected in the platform until a platform command touches the conversation.
   item 2, and section 5.2). Cost: one engine idempotency record and decision row per dispatch attempt.
 - **`/assign`:** the dashboard's `Idempotency-Key` header (required, 1 to 128 characters, else 400
   `VALIDATION_FAILED`), passed through unchanged. One click is one key; a retry of the same click reuses it and gets the
-  stored decision; a second click with a new key on an assigned conversation is 409.
+  stored decision; a second click with a new key is answered like any lost claim: the engine says
+  `CONVERSATION_NOT_ALLOCATABLE`, and `/assign` reads the record and answers 200 when the caller already holds the
+  conversation, else 409 (R-P17).
 - Worker keys (`assign:` prefix) and dashboard keys (random UUIDs) never coincide, so the engine's
   `IDEMPOTENCY_KEY_REUSED` cannot be triggered by design.
 
@@ -175,6 +187,7 @@ reflected in the platform until a platform command touches the conversation.
 | `app.assignment.enabled` (`APP_ASSIGNMENT_ENABLED`) | `true` | gates only the scheduled tick; tests call `runOnce()` |
 | `app.assignment.poll-delay` | 2 s | tick interval; retry after `CONFLICT_RETRYABLE`; backoff base |
 | `app.assignment.queued-poll` | 5 s | fixed poll interval of `QUEUED` rows (overview §7 C) |
+| `app.assignment.failed-poll` | 60 s | re-read interval of `FAILED` rows: `findConversation` only, no dispatch (R-P17) |
 | `app.assignment.lease` | 30 s | claim lease; a crashed worker's rows return after it |
 | `app.assignment.max-backoff` | 60 s | cap for error backoff (jitter before the cap) |
 | `app.assignment.max-setup-attempts` | 30 | `assignment_setup_failures` that make a row `FAILED` (R-P2) |
@@ -184,7 +197,9 @@ reflected in the platform until a platform command touches the conversation.
 
 Backoff (R-P15): `outbox.Backoff.next(now, n, base, max, rng) = now + min(base × 2^n ± 20 %, max)` with a 0-based
 `n`; the worker passes `n = attempts − 1`, `base = poll-delay`, `max = max-backoff`. Because `assignment_attempts` is
-monotonic, a row that has already been polled many times backs off at the 60 s cap on its first error.
+monotonic, a row that has already been polled many times backs off at the 60 s cap on its first error. Accepted
+(R-P16): the engine's own sweep keeps assigning queued conversations while it is up, and during an outage everything
+waits anyway; the cost is up to 60 s of extra assignment latency right after an outage ends.
 
 With these values a sweep assignment is projected within about 7 s (2 s sweep + 5 s poll), and the dashboard sees it
 after the next outbox publication (about 0.5 s).
@@ -208,9 +223,14 @@ Order:
    holds (`ASSIGNED`/`ACCEPTED`/`ACTIVE` → `ASSIGNED` with that agent, `QUEUED` → `QUEUED`, absent or `RESOLVED` →
    `REQUESTED` for the worker, `CANCELLED` → `FAILED`), then answer 409 `ALLOCATION_REJECTED` with detail
    `NOT_ASSIGNED` (R-P14).
-5. `AllocationUnavailableException` → 503 `ALLOCATION_UNAVAILABLE`; any other engine rejection → 409
+5. `REJECTED_INVALID_INPUT` with `CONVERSATION_NOT_ALLOCATABLE` (a sweep or another claim assigned the conversation
+   first): the same read-and-project as step 4, then 200 with the agent view when the engine record is now assigned to
+   the caller, else 409 `ALLOCATION_REJECTED` with detail `CONVERSATION_NOT_ALLOCATABLE`. A `FAILED` projection can
+   coexist with an engine `QUEUED` record that the sweep later assigns (section 3), so this is also how `/assign`
+   repairs a stale `FAILED` (R-P17).
+6. `AllocationUnavailableException` → 503 `ALLOCATION_UNAVAILABLE`; any other engine rejection → 409
    `ALLOCATION_REJECTED` with the engine code in `detail`, projection unchanged.
-6. Success answers with the agent `ConversationView` (full assignment).
+7. Success answers with the agent `ConversationView` (full assignment).
 
 ## 6. Presence and availability (D9, master spec 11.1)
 
@@ -243,7 +263,7 @@ Rows marked **deviation** differ from the research recommendation on purpose (se
 | # | Situation | Platform behaviour |
 |---|---|---|
 | F1 | Engine down, restarting, timing out, 5xx | worker keeps the state and backs off (up to 60 s), next attempt with the next key (**deviation**: research retries with the same key); `/assign` and presence 503; chat unaffected; status `allocation` DOWN |
-| F2 | Tenant missing (engine database reset or never seeded) | `assignment_setup_failures` backoff, `FAILED` at 30, while `AllocationLocalSeeder` or the admin tenants endpoint re-seeds; `RELEASE_PENDING` keeps retrying; a record lost from a `QUEUED` row returns to `REQUESTED` |
+| F2 | Tenant missing (engine database reset or never seeded) | `assignment_setup_failures` backoff, `FAILED` at 30, while `AllocationLocalSeeder` or the admin tenants endpoint re-seeds; `RELEASE_PENDING` confirms the 404 with `findConversation` and, with the record absent, becomes `NONE` (R-P17); a record lost from a `QUEUED` row returns to `REQUESTED` |
 | F3, F3b | Queue or policy missing | as F2, then `FAILED` with `QUEUE_NOT_FOUND` / `NO_ACTIVE_POLICY` |
 | F4 | `CONVERSATION_EXISTS` on create | success |
 | F5 | `NOT_ASSIGNED` on reassign | `/assign` reads the engine record, projects it and answers 409 (section 5). `ASSIGNED` rows are not reconciled in the background in the MVP (limitation, section 3). |
@@ -251,8 +271,8 @@ Rows marked **deviation** differ from the research recommendation on purpose (se
 | F6c | `FEATURE_DISABLED` | `FAILED` (`RELEASE_PENDING`: backoff and WARN); fix `ALLOCATION_FEATURE_LEVEL=operations` |
 | F7 | `CONFLICT_RETRYABLE` | stays `REQUESTED`, retried on the next tick with the next key (**deviation**: the outcome is not stored, so a new key is as safe as the same one); `/assign` 409 with a retry hint |
 | F8 | `QUEUED_*` | `QUEUED` and poll; no re-dispatch (R-P1) |
-| F9 | `QUEUED_FEATURE_DISABLED`, `SKIPPED_POLICY_DISABLED`, `FAILED_INTERNAL` | `QUEUED` (visible) or `FAILED`; operator fixes the policy, then `/assign` |
-| F10 | `REJECTED_INVALID_INPUT` | worker: reconcile for `CONVERSATION_NOT_ALLOCATABLE`, else `FAILED`; `/assign`: 409, projection unchanged |
+| F9 | `QUEUED_FEATURE_DISABLED`, `SKIPPED_POLICY_DISABLED`, `FAILED_INTERNAL` | `QUEUED` (visible) or `FAILED`; operator fixes the policy, then `/assign`; a `FAILED` row is also re-read every 60 s and follows a later sweep assignment (R-P17) |
+| F10 | `REJECTED_INVALID_INPUT` | worker: reconcile for `CONVERSATION_NOT_ALLOCATABLE`, else `FAILED`; `/assign`: `CONVERSATION_NOT_ALLOCATABLE` reads and projects the engine state, then 200 (now assigned to the caller) or 409 (R-P17); other reasons 409, projection unchanged |
 | F11 | `CLAIM_REJECTED` | 409 to the agent with `reasonCodes`, projection unchanged |
 | F12 | `IDEMPOTENCY_KEY_REUSED`; `IDEMPOTENCY_RACE` | the first cannot happen by key design (`FAILED` and WARN if it does); the second is transient (backoff) |
 | (A3, V3, V4) | `CONCURRENT_MODIFICATION` | transient: backoff, next attempt (R-P14) |

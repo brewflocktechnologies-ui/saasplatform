@@ -62,7 +62,7 @@ Counter `realtime.tokens{type=connection|subscription, outcome=issued|denied}` m
 | `/api/v1/agent/**` | bearer, `typ = agent` | `tenant` claim | `sub` (agent id); every inbox of the tenant |
 | `/api/v1/admin/**` | `X-Admin-Token`; local-dev only | none in the caller (`Caller(null, ADMIN, "admin", null)`); the tenant is named in the path or body | cross-tenant operator |
 | `GET /api/v1/status`, `/api/v1/bootstrap`, `/actuator/health` | none | none; return no tenant data | `/actuator/prometheus` only in the `local` profile (`ObservabilityIT.prometheusOnlyInLocalProfile`) |
-| `OutboxPublisher`, `AssignmentWorker` | n/a | each claimed row's `tenant_id`, carried into every follow-up statement and call | the two claims are the only cross-tenant data statements; the one other unfiltered statement is the authorization probe of section 4 (R-P6) |
+| `OutboxPublisher`, `AssignmentWorker` | n/a | each claimed row's `tenant_id`, carried into every follow-up statement and call | the two claims are the only cross-tenant data statements; every other statement is tenant-filtered, except the authorization probe and the statements keyed only by primary key inside a transaction after a tenant-filtered lock or lookup (including the outbox marks by `event_id` + worker id after a claim), as stated in section 4 (R-P6 amended) |
 | Calls to the allocation service | `X-Tenant-Id` = our tenant id, `X-Role` = `operator` (`admin` for seeding) | the conversation's or agent's tenant | [allocation-integration.md](allocation-integration.md) |
 
 Request bodies never carry a tenant id that the server trusts, except the admin and local-login endpoints above.
@@ -107,13 +107,13 @@ Tests: `ConversationApiIT.contactCannotReadAnotherInboxConversation`, `sameAgent
 | `chat:conversation:<id>` of another tenant | 403 | 403 |
 | `chat:inbox:<ownTenant>:<inboxOfOwnTenant>` | 403 | allowed |
 | `chat:inbox:<tenantA>:<inboxOfTenantB>` (mismatched pair) or another tenant | 403 | 403 |
-| unknown conversation or inbox id | 404 (no named test yet; Plan 03 `ChannelAuthorizer` throws only 403/400 and needs this case) | 404 (same) |
+| unknown conversation or inbox id | 404 (conversation: `RealtimeTokenIT.unknownConversationChannelIs404`, decided with the R-P6 probe; Plan 03 T3) | 404 (same) |
 | malformed (not exactly one of the two forms, uppercase UUID, extra segments) | 400 `VALIDATION_FAILED` | 400 |
 
 The browser cannot subscribe without a token (namespace option), cannot reuse a token for another channel (Centrifugo
 checks the `channel` claim; code 103), and cannot publish (client publish denied). Durable events reach Centrifugo only
-from the backend with `CENTRIFUGO_HTTP_API_KEY`, which never reaches a browser. Tests: `RealtimeTokenIT` (all ten
-cases), contract `subscriptionTokenForAnotherChannelIsRejected`, E2E `nonParticipantCannotLoadHistoryOrSubscribe`.
+from the backend with `CENTRIFUGO_HTTP_API_KEY`, which never reaches a browser. Tests: `RealtimeTokenIT` (every
+case above), contract `subscriptionTokenForAnotherChannelIsRejected`, E2E `nonParticipantCannotLoadHistoryOrSubscribe`.
 
 ## 6. Admin endpoints and the production guard
 

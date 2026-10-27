@@ -9,7 +9,8 @@
   [ADR-0008](../../decisions/ADR-0008-tenant-isolation-and-local-identity.md), [ADR-0009](../../decisions/ADR-0009-allocation-service-integration.md)
 - **Design:** [system overview](../../../docs/architecture/system-overview.md) and the documents it indexes; plan set
   [00-overview](../../../docs/superpowers/plans/2026-10-27-conversation-platform-00-overview.md) (decisions `D1` to
-  `D20`, glossary §5); rulings `R1` to `R16` in system-overview.md section 7.
+  `D20`, glossary §5; §8 there lists the rulings that changed the plans); rulings `R1` to `R16` and `R-P1` to `R-P17` in
+  system-overview.md section 7.
 
 ## 1. Problem and desired outcome
 
@@ -194,11 +195,13 @@ required `code` and optional `traceId`, `reasonCodes`). All endpoints of overvie
 ## 6. Tenant authorization and threat considerations
 
 - Tenant and principal come only from verified session tokens (contact or agent) or the local-dev admin token; every
-  statement filters `tenant_id`; cross-tenant access is 403 at the API and at subscription-token issuance; subscription
-  tokens are bound to one exact channel. Full rules: [tenant-security.md](../../../docs/architecture/tenant-security.md).
+  data statement filters `tenant_id` (exceptions in the next bullet); cross-tenant access is 403 at the API and at
+  subscription-token issuance; subscription tokens are bound to one exact channel. Full rules: [tenant-security.md](../../../docs/architecture/tenant-security.md).
 - Threats and mitigations (spoofing, cross-tenant leakage, channel hijack, forged events, XSS, abuse, log leakage,
-  enumeration, admin misuse, routing details shown to visitors): tenant-security.md section 8. The only unfiltered
-  statement is the authorization probe `tenantAndInboxOf(id)` (R-P6). Local shortcuts ("LOCAL POC — NOT REAL AUTHENTICATION") and
+  enumeration, admin misuse, routing details shown to visitors): tenant-security.md section 8. Every data
+  statement is tenant-filtered except the authorization probe `tenantAndInboxOf(id)`, statements keyed only by primary
+  key inside a transaction after a tenant-filtered lock or lookup of that row, and the worker claims and marks (R-P6
+  amended; tenant-security.md section 4). Local shortcuts ("LOCAL POC — NOT REAL AUTHENTICATION") and
   their production replacements: section 9 there.
 - Secrets introduced: `APP_SESSION_TOKEN_HMAC_SECRET_KEY`, `APP_LOCAL_ADMIN_TOKEN`, `ALLOCATION_DB_PASSWORD`
   (`__generate__` in `.env.example`); flags `APP_LOCAL_DEV_ENABLED` (default false), `APP_SEED_WIDGET_KEY`.
@@ -245,15 +248,20 @@ Tests the Plan 01 rulings add to the plans (amendments recorded in the Plan 01 l
 `LifecycleIT.unarchivePurgedConversationIs409` and `versionIncrementsOnStateWritesOnly` (Plan 02, R-P8, R-P9); archive
 releasing and unarchive re-requesting the assignment (Plan 02 `LifecycleIT`, Plan 04 claim SQL, R-P13); the reduced
 contact view and event payloads (Plan 02, Plan 04, R-P3); `assignment_setup_failures` counting and reset (Plan 04, R-P2);
-presence without `heartbeatAt` (Plan 04, R-P4); `sync.ts` 5-page cap and version-rule refetches (Plan 06 T1, R-P5).
+presence without `heartbeatAt` (Plan 04, R-P4); `sync.ts` 5-page cap and version-rule refetches (Plan 06 T1, R-P5);
+`FAILED` rows released on resolve and archive and re-read every 60 s, a missing tenant on release, and `/assign`
+reading the engine state after `CONVERSATION_NOT_ALLOCATABLE` (Plan 02 `LifecycleIT`, Plan 04
+`failedRowProjectsLaterSweepAssignment`, `resolveOfFailedReleasesThroughEngine`, `releasePendingTenantMissingBecomesNone`,
+`assignNotAllocatableProjectsEngineState`, R-P17); `RealtimeTokenIT.unknownConversationChannelIs404` (Plan 03 T3, R-P6).
 
 Design rules still without a named test (to add in the plan that owns the code):
 - `sync.ts`: a failed apply keeps the cursor and does a full reload (SI-6); an API head below `lastContiguous` does a
   full reload (SI-9 client side); the snapshot-plus-events property test over the three interleavings (SI-12)
   (Plan 06 T1).
-- `ChannelAuthorizer`: a subscription-token request for an unknown conversation or inbox id answers 404
-  ([tenant-security.md](../../../docs/architecture/tenant-security.md) section 5); Plan 03 T3 currently throws only
-  403 and 400, so its `RealtimeTokenIT` needs this case.
+- `ChannelAuthorizer`: a subscription-token request for an unknown **inbox** id answers 404
+  ([tenant-security.md](../../../docs/architecture/tenant-security.md) section 5); Plan 03 T3 implements and tests only
+  the conversation case (`RealtimeTokenIT.unknownConversationChannelIs404`), because telling an unknown inbox from
+  another tenant's needs a second unfiltered statement that R-P6 does not allow. Open question for the plan owner.
 
 ## 9. Rollout, compatibility and rollback
 
