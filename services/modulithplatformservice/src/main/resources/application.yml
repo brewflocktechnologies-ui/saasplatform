@@ -38,6 +38,53 @@ app:
     connection-token-secret: ${CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY:}
     subscription-token-secret: ${CENTRIFUGO_CLIENT_SUBSCRIPTION_TOKEN_HMAC_SECRET_KEY:}
     token-ttl: ${CENTRIFUGO_TOKEN_TTL:5m}
+  sessions:
+    # HS256 session JWTs for contacts and agents (ADR-0008). Startup fails when the secret is missing or < 32 chars.
+    secret: ${APP_SESSION_TOKEN_HMAC_SECRET_KEY:}
+    contact-ttl: ${APP_SESSION_CONTACT_TTL:24h}
+    # How long after its first issue (auth_time claim) a contact session may still be refreshed (R-P31 M4).
+    contact-refresh-max-age: ${APP_SESSION_CONTACT_REFRESH_MAX_AGE:30d}
+    agent-ttl: ${APP_SESSION_AGENT_TTL:12h}
+  local-dev:
+    # Local login, admin API and the purge cutoff override. Never true in production (LocalDevGuard).
+    enabled: ${APP_LOCAL_DEV_ENABLED:false}
+    admin-token: ${APP_LOCAL_ADMIN_TOKEN:}
+  seed:
+    enabled: ${APP_SEED_ENABLED:false}
+    tenant-id: ${APP_SEED_TENANT_ID:tenant-local}
+    widget-key: ${APP_SEED_WIDGET_KEY:wk_local_demo}
+    queue-id: ${APP_SEED_QUEUE_ID:support}
+  allocation:
+    url: ${ALLOCATION_URL:http://localhost:8081}
+    timeout: ${ALLOCATION_TIMEOUT:3s}
+  assignment:
+    # Gates only the scheduled tick; the worker bean and runOnce() always exist.
+    enabled: ${APP_ASSIGNMENT_ENABLED:true}
+    poll-delay: ${APP_ASSIGNMENT_POLL_DELAY:2s}
+    queued-poll: ${APP_ASSIGNMENT_QUEUED_POLL:5s}
+    failed-poll: ${APP_ASSIGNMENT_FAILED_POLL:60s}
+    lease: ${APP_ASSIGNMENT_LEASE:30s}
+    batch-size: ${APP_ASSIGNMENT_BATCH_SIZE:20}
+    max-backoff: ${APP_ASSIGNMENT_MAX_BACKOFF:60s}
+    max-setup-attempts: ${APP_ASSIGNMENT_MAX_SETUP_ATTEMPTS:30}
+  outbox:
+    enabled: ${APP_OUTBOX_ENABLED:true}
+    poll-delay: ${APP_OUTBOX_POLL_DELAY:500ms}
+    batch-size: ${APP_OUTBOX_BATCH_SIZE:100}
+    lease: ${APP_OUTBOX_LEASE:30s}
+    max-attempts: ${APP_OUTBOX_MAX_ATTEMPTS:10}
+    base-backoff: ${APP_OUTBOX_BASE_BACKOFF:1s}
+    max-backoff: ${APP_OUTBOX_MAX_BACKOFF:60s}
+  presence:
+    stale-after: ${APP_PRESENCE_STALE_AFTER:60s}
+  limits:
+    message-length: ${APP_LIMIT_MESSAGE_LENGTH:4000}
+    history-page-max: ${APP_LIMIT_HISTORY_PAGE_MAX:200}
+    inbox-page-max: ${APP_LIMIT_INBOX_PAGE_MAX:100}
+  rate-limits:
+    sessions-per-minute: ${APP_RATE_LIMIT_SESSIONS_PER_MINUTE:10}
+    messages-per-minute: ${APP_RATE_LIMIT_MESSAGES_PER_MINUTE:30}
+    typing-interval: ${APP_RATE_LIMIT_TYPING_INTERVAL:2s}
 
 logging:
   structured:

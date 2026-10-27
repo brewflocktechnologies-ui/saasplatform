@@ -5,3 +5,13 @@ management:
     web:
       exposure:
         include: health,info,prometheus
+
+# Local development enables the demo identities (LOCAL POC — NOT REAL AUTHENTICATION), the admin API and the seeder.
+app:
+  local-dev:
+    enabled: true
+  seed:
+    enabled: true
+  rate-limits:
+    # E2E and contract suites open many sessions from 127.0.0.1 with one widget key; the product default is 10.
+    sessions-per-minute: ${APP_RATE_LIMIT_SESSIONS_PER_MINUTE:600}
