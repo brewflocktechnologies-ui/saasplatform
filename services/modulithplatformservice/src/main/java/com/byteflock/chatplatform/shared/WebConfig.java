@@ -21,7 +21,8 @@ class WebConfig implements WebMvcConfigurer {
 	public void addCorsMappings(CorsRegistry registry) {
 		registry.addMapping("/api/**")
 			.allowedOrigins(this.allowedOrigins.toArray(String[]::new))
-			.allowedMethods("GET", "POST")
+			.allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
+			.allowedHeaders("Authorization", "Content-Type", "Idempotency-Key", "X-Admin-Token")
 			.exposedHeaders(TraceIdResponseFilter.HEADER);
 	}
 

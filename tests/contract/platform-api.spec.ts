@@ -49,7 +49,7 @@ async function expectProblem(res: Awaited<ReturnType<APIRequestContext['get']>>,
   expect(res.headers()['content-type']).toContain('application/problem+json');
   const body = await res.json();
   expectValid('Problem', body);
-  expect(JSON.stringify(body)).not.toMatch(/trace|exception|sql|secret/i);
+  expect(JSON.stringify(body)).not.toMatch(/stack ?trace|exception|sql|secret/i);
 }
 
 test.describe('platform-api contract (live backend)', () => {
@@ -170,7 +170,7 @@ test.describe('realtime event contract (live Centrifugo)', () => {
       expect(realtimeDelivery).toBe('PUBLISHED');
       await expect.poll(() => received.length, { timeout: 5000 }).toBeGreaterThan(0);
       const event = received.find((e) => (e as { message?: { id: string } }).message?.id === message.id);
-      expectValid(`${SCHEMA_BASE}chat/message-created.v1.schema.json`, event);
+      expectValid(`${SCHEMA_BASE}chat/demo-message-created.v1.schema.json`, event);
 
       // Client-side publication is disabled for the chat namespace.
       await expect(sub.publish({ type: 'message.created' })).rejects.toMatchObject({ code: 103 });

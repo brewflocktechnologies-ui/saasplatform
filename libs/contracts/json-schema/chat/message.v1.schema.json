@@ -1,57 +1,49 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.chat-platform.local/chat/message.v1.schema.json",
-  "title": "ChatMessage",
-  "description": "A persisted chat message (also the `message` payload of message.created).",
+  "title": "MessageView",
+  "description": "A persisted platform message. Bodies are never updated in the MVP; editedAt and deletedAt are reserved for a later version and are null today.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "id",
     "conversationId",
+    "sequence",
+    "senderType",
     "senderId",
-    "senderRole",
+    "messageType",
     "body",
-    "createdAt"
+    "clientMessageId",
+    "createdAt",
+    "editedAt",
+    "deletedAt"
   ],
   "properties": {
-    "id": {
-      "type": "string",
-      "format": "uuid"
-    },
-    "conversationId": {
-      "type": "string",
-      "format": "uuid"
-    },
-    "senderId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 80
-    },
-    "senderRole": {
-      "type": "string",
-      "enum": [
-        "VISITOR",
-        "AGENT"
-      ]
-    },
-    "body": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 4000
-    },
-    "createdAt": {
-      "type": "string",
-      "format": "date-time"
-    }
+    "id": { "type": "string", "format": "uuid" },
+    "conversationId": { "type": "string", "format": "uuid" },
+    "sequence": { "type": "integer", "minimum": 1, "description": "Gap-free per-conversation ordering." },
+    "senderType": { "type": "string", "enum": ["CONTACT", "AGENT", "BOT", "SYSTEM"] },
+    "senderId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "messageType": { "type": "string", "enum": ["TEXT"] },
+    "body": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "clientMessageId": { "type": ["string", "null"], "minLength": 1, "maxLength": 64 },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "editedAt": { "type": ["string", "null"], "format": "date-time" },
+    "deletedAt": { "type": ["string", "null"], "format": "date-time" }
   },
   "examples": [
     {
       "id": "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6071",
       "conversationId": "019a1b2c-0000-7000-8000-000000000001",
-      "senderId": "userone",
-      "senderRole": "VISITOR",
+      "sequence": 1,
+      "senderType": "CONTACT",
+      "senderId": "019a1b2c-0000-7000-8000-000000000003",
+      "messageType": "TEXT",
       "body": "Hello, can you help me?",
-      "createdAt": "2026-10-25T12:00:00Z"
+      "clientMessageId": "6f1c9a1e-0b2d-4c33-9a77-8f3a55c0a111",
+      "createdAt": "2026-10-27T12:00:00Z",
+      "editedAt": null,
+      "deletedAt": null
     }
   ]
 }

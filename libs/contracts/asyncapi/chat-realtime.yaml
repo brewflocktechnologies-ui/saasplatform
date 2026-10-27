@@ -7,7 +7,7 @@ info:
     commit. Browsers only subscribe (subscription JWT per exact actor + channel); client publication is disabled.
     Delivery is at-most-once (publish-after-commit, no outbox): clients reload history from the REST API on
     (re)subscribe and deduplicate by message id. Payload schemas: `libs/contracts/json-schema/chat/`.
-    LOCAL POC — demo identities `userone` / `agentbob` only.
+    LOCAL POC â€” demo identities `userone` / `agentbob` only.
 defaultContentType: application/json
 servers:
   local:
@@ -56,10 +56,10 @@ components:
       title: Message created
       summary: A message was persisted.
       payload:
-        $ref: '../json-schema/chat/message-created.v1.schema.json'
+        $ref: '../json-schema/chat/demo-message-created.v1.schema.json'
     conversationCreated:
       name: conversation.created
       title: Conversation created
       summary: The demo conversation was created.
       payload:
-        $ref: '../json-schema/chat/conversation-created.v1.schema.json'
+        $ref: '../json-schema/chat/demo-conversation-created.v1.schema.json'

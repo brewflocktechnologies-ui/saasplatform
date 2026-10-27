@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chat-platform.local/chat/demo-conversation.v1.schema.json",
+  "title": "Conversation",
+  "description": "Conversation summary as returned by the API and carried by conversation.created.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "visitorId",
+    "assignedAgentId",
+    "status",
+    "createdAt",
+    "updatedAt"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "visitorId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "assignedAgentId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "OPEN",
+        "CLOSED"
+      ]
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "lastMessageAt": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "lastMessagePreview": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 120
+    }
+  }
+}

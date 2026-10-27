@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.chat-platform.local/chat/conversation-created.v1.schema.json",
+  "$id": "https://schemas.chat-platform.local/chat/demo-conversation-created.v1.schema.json",
   "title": "ConversationCreatedEvent",
   "description": "Published on chat:inbox when the demo conversation is created.",
   "type": "object",
@@ -14,7 +14,7 @@
       "const": "conversation.created"
     },
     "conversation": {
-      "$ref": "conversation.v1.schema.json"
+      "$ref": "demo-conversation.v1.schema.json"
     }
   }
 }

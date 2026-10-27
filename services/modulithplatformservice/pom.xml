@@ -130,6 +130,14 @@
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-surefire-plugin</artifactId>
 				<configuration>
+					<!-- Integration tests are named *IT and use Testcontainers; they run in the same phase so a plain
+					     `mvn verify` is the whole backend suite (they are skipped without Docker via
+					     @Testcontainers(disabledWithoutDocker = true)). -->
+					<includes>
+						<include>**/*Test.java</include>
+						<include>**/*Tests.java</include>
+						<include>**/*IT.java</include>
+					</includes>
 					<systemPropertyVariables>
 						<flyway.sql.dir>${flyway.sql.dir}</flyway.sql.dir>
 					</systemPropertyVariables>

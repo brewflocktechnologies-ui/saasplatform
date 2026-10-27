@@ -1,61 +1,88 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.chat-platform.local/chat/conversation.v1.schema.json",
-  "title": "Conversation",
-  "description": "Conversation summary as returned by the API and carried by conversation.created.",
+  "title": "ConversationView",
+  "description": "Conversation as returned by the widget and agent APIs. Contacts get the reduced assignment object (state, agentId); agents additionally get decisionId, reason and explanation. purgedAt is set by the retention purge, and unreadCount is 0 then.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "id",
-    "visitorId",
-    "assignedAgentId",
+    "tenantId",
+    "inboxId",
+    "contactId",
+    "contactDisplayName",
     "status",
+    "version",
+    "lastSequence",
+    "lastMessageAt",
+    "lastMessagePreview",
+    "assignment",
+    "resolvedAt",
+    "archivedAt",
+    "purgedAt",
     "createdAt",
-    "updatedAt"
+    "updatedAt",
+    "unreadCount",
+    "agentOnline"
   ],
   "properties": {
-    "id": {
-      "type": "string",
-      "format": "uuid"
-    },
-    "visitorId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 80
-    },
-    "assignedAgentId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 80
-    },
-    "status": {
-      "type": "string",
-      "enum": [
-        "OPEN",
-        "CLOSED"
-      ]
-    },
-    "createdAt": {
-      "type": "string",
-      "format": "date-time"
-    },
-    "updatedAt": {
-      "type": "string",
-      "format": "date-time"
-    },
-    "lastMessageAt": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "format": "date-time"
-    },
-    "lastMessagePreview": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "maxLength": 120
+    "id": { "type": "string", "format": "uuid" },
+    "tenantId": { "type": "string", "minLength": 1, "maxLength": 63 },
+    "inboxId": { "type": "string", "format": "uuid" },
+    "contactId": { "type": "string", "format": "uuid" },
+    "contactDisplayName": { "type": ["string", "null"], "maxLength": 200 },
+    "status": { "type": "string", "enum": ["OPEN", "PENDING", "RESOLVED"] },
+    "version": { "type": "integer", "minimum": 0 },
+    "lastSequence": { "type": "integer", "minimum": 0 },
+    "lastMessageAt": { "type": ["string", "null"], "format": "date-time" },
+    "lastMessagePreview": { "type": ["string", "null"], "maxLength": 120 },
+    "assignment": { "$ref": "#/$defs/assignment" },
+    "resolvedAt": { "type": ["string", "null"], "format": "date-time" },
+    "archivedAt": { "type": ["string", "null"], "format": "date-time" },
+    "purgedAt": { "type": ["string", "null"], "format": "date-time" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "unreadCount": { "type": "integer", "minimum": 0 },
+    "agentOnline": { "type": ["boolean", "null"], "description": "Allocation presence of the assigned agent; null when it cannot be determined." }
+  },
+  "$defs": {
+    "assignment": {
+      "type": "object",
+      "description": "Assignment projection. state and agentId are always present (agentId null when no agent holds the conversation); decisionId, reason and explanation only exist for agent callers.",
+      "required": ["state", "agentId"],
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": ["NONE", "REQUESTED", "QUEUED", "ASSIGNED", "RELEASE_PENDING", "REOPEN_PENDING", "FAILED"]
+        },
+        "agentId": { "type": ["string", "null"], "maxLength": 128 },
+        "decisionId": { "type": ["string", "null"], "format": "uuid" },
+        "reason": { "type": ["string", "null"], "maxLength": 200 },
+        "explanation": { "type": ["string", "null"], "maxLength": 2000 }
+      },
+      "additionalProperties": false
     }
-  }
+  },
+  "examples": [
+    {
+      "id": "019a1b2c-0000-7000-8000-000000000001",
+      "tenantId": "tenant-local",
+      "inboxId": "019a1b2c-0000-7000-8000-000000000002",
+      "contactId": "019a1b2c-0000-7000-8000-000000000003",
+      "contactDisplayName": "User One",
+      "status": "OPEN",
+      "version": 1,
+      "lastSequence": 3,
+      "lastMessageAt": "2026-10-27T12:00:00Z",
+      "lastMessagePreview": "Hello, can you help me?",
+      "assignment": { "state": "REQUESTED", "agentId": null },
+      "resolvedAt": null,
+      "archivedAt": null,
+      "purgedAt": null,
+      "createdAt": "2026-10-27T11:59:00Z",
+      "updatedAt": "2026-10-27T12:00:00Z",
+      "unreadCount": 2,
+      "agentOnline": null
+    }
+  ]
 }
