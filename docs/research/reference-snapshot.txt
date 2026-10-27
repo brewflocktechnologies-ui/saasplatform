@@ -1,0 +1,19 @@
+# Reference checkout snapshot - Plan 01 Task 1 (workspace inventory)
+# Taken: 2026-10-27T02:21:25Z (machine local time is +0530); base directory: D:\BYTEFLOCK\RESEARCH\Allocationservice-research
+# Purpose: Plan 07 T5 re-runs the two commands below per directory and proves the reference checkouts were not modified.
+#   files  = find <dir> -type f | wc -l
+#   newest = find <dir> -type f -printf '%T@\n' | sort -n | tail -1   (epoch seconds, GNU find in Git Bash)
+# Columns (tab separated): directory  files  newest_epoch  newest_utc
+# Notes:
+#  - The checkouts are zip snapshots without .git; nothing here is a git status.
+#  - Rocket.Chat-develop contains a duplicate subtree Rocket.Chat-develop/Rocket.Chat-develop (identical relative paths and file sizes
+#    to the original tree; its newest file mtime is 2026-10-27 06:01 local, the original tree's newest is 2026-10-26 13:25 local).
+#    The whole-tree line includes the duplicate (27070 = 2 x 13535); the last line below is the original tree with the duplicate pruned.
+#  - zulip-main/zulip-main is the real source root; zulip-main is its wrapper directory, so both lines carry the same values.
+chatwoot-develop	9793	1792771674.0000000000	2026-10-23T16:07:54Z
+Rocket.Chat-develop	27070	1793061074.5919650000	2026-10-27T00:31:14Z
+Rocket.Chat-develop/Rocket.Chat-develop	13535	1793061074.5919650000	2026-10-27T00:31:14Z
+zulip-main	9022	1793061054.1629145000	2026-10-27T00:30:54Z
+zulip-main/zulip-main	9022	1793061054.1629145000	2026-10-27T00:30:54Z
+livehelperchat-master	6320	1793001073.5468342000	2026-10-26T07:51:13Z
+Rocket.Chat-develop [duplicate pruned: find Rocket.Chat-develop -path Rocket.Chat-develop/Rocket.Chat-develop -prune -o -type f ...]	13535	1793001314.6714205000	2026-10-26T07:55:14Z
