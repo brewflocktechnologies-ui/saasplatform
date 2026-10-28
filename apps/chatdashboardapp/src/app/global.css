@@ -186,7 +186,7 @@ dd {
   font-size: var(--cp-font-size-100);
   opacity: 0.85;
 }
-.bubble.VISITOR {
+.bubble.CONTACT {
   align-self: flex-start;
   background: var(--cp-color-background);
 }
@@ -211,4 +211,46 @@ dd {
 .composer input:focus-visible {
   outline: none;
   box-shadow: var(--cp-focus-ring);
+}
+.tabs {
+  display: flex;
+  gap: var(--cp-spacing-xs);
+  margin-bottom: var(--cp-spacing-sm);
+}
+.tab {
+  font: inherit;
+  padding: var(--cp-spacing-xs) var(--cp-spacing-md);
+  color: var(--cp-color-text);
+  background: var(--cp-color-surface);
+  border: var(--cp-border);
+  border-radius: var(--cp-radius-control);
+  cursor: pointer;
+}
+.tab[aria-selected='true'] {
+  border-color: var(--cp-color-primary);
+  color: var(--cp-color-primary);
+}
+.tab:focus-visible {
+  outline: none;
+  box-shadow: var(--cp-focus-ring);
+}
+.unread {
+  justify-self: start;
+  padding: 0 var(--cp-spacing-sm);
+  border-radius: var(--cp-radius-badge);
+  background: var(--cp-color-primary);
+  color: var(--cp-color-on-primary);
+  font-size: var(--cp-text-sm);
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cp-spacing-sm);
+  margin: var(--cp-spacing-sm) 0;
+}
+.bubble[data-state='pending'] {
+  opacity: 0.6;
+}
+.bubble[data-state='failed'] {
+  outline: var(--cp-border-width-1) solid var(--cp-color-danger);
 }
