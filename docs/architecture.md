@@ -60,7 +60,30 @@ RFC 9457 `application/problem+json` without stack traces.
 - Roles and schema are bootstrapped by `database/postgres-init/01-roles.sh` on first volume initialisation.
 - Migrations are immutable once applied; add `V<n>__description.sql`.
 
+## Conversation platform
+
+Design of the multi-tenant conversation platform (plan set
+[superpowers/plans/2026-10-27-conversation-platform-00-overview.md](superpowers/plans/2026-10-27-conversation-platform-00-overview.md),
+feature spec [specs/features/conversation-platform/feature.spec.md](../specs/features/conversation-platform/feature.spec.md)).
+It replaces the chat MVP below; Plans 02 to 07 implement it.
+
+| Document | Content |
+|---|---|
+| [architecture/system-overview.md](architecture/system-overview.md) | components and ports, module map, failure modes, rulings, deliverable map; diagram [architecture/diagrams/conversation-platform.html](architecture/diagrams/conversation-platform.html) |
+| [architecture/domain-model.md](architecture/domain-model.md) | entities, V3 tables, conversation and assignment state machines, identifiers |
+| [architecture/message-lifecycle.md](architecture/message-lifecycle.md) | send transaction, idempotency, ordering, history, read cursors |
+| [architecture/realtime-and-recovery.md](architecture/realtime-and-recovery.md) | channels, events, outbox publisher, client sync and reconnect |
+| [architecture/tenant-security.md](architecture/tenant-security.md) | tokens, tenant scoping, channel authorization, local-only shortcuts |
+| [architecture/archive-retention-purge.md](architecture/archive-retention-purge.md) | resolve, archive, reopen, purge |
+| [architecture/allocation-integration.md](architecture/allocation-integration.md) | allocation service topology, worker, `/assign`, presence |
+| ADRs [0005](../specs/decisions/ADR-0005-conversation-platform-modules.md), [0006](../specs/decisions/ADR-0006-message-write-and-ordering.md), [0007](../specs/decisions/ADR-0007-transactional-outbox-and-centrifugo.md), [0008](../specs/decisions/ADR-0008-tenant-isolation-and-local-identity.md), [0009](../specs/decisions/ADR-0009-allocation-service-integration.md) | modules, ordering, outbox, tenant isolation, allocation integration |
+| Research | [research/workspace-inventory.md](research/workspace-inventory.md), [research/reference-comparison.md](research/reference-comparison.md), [research/allocation-service-integration.md](research/allocation-service-integration.md), [research/license-review.md](research/license-review.md) |
+
 ## Chat MVP and real-time
+
+> **Superseded by Plan 06** of the conversation platform (section above): Plan 06 T4 removes the `chat` module and
+> `/api/v1/demo/*`; the V2 tables stay until a later migration drops them. This section describes the code as it is
+> until then.
 
 Implemented by [specs/mvpsetup.spec.md](../specs/mvpsetup.spec.md); guide: [features/local-chat-mvp.md](features/local-chat-mvp.md).
 
