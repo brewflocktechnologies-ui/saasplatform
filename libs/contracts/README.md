@@ -4,9 +4,9 @@ API-first contracts for the platform.
 
 | Path | Purpose |
 |---|---|
-| `openapi/platform-api.yaml` | OpenAPI 3.1 contract of `modulithplatformservice`: widget session/conversation API, agent inbox/conversation API (bearer session tokens), status/bootstrap, the local-dev demo API and RFC 9457 errors with a stable `code` |
+| `openapi/platform-api.yaml` | OpenAPI 3.1 contract of `modulithplatformservice`: widget session/conversation API, agent inbox/conversation API (bearer session tokens), status/bootstrap and RFC 9457 errors with a stable `code` |
 | `asyncapi/chat-realtime.yaml` | AsyncAPI 3.0: Centrifugo channels `chat:inbox`, `chat:conversation:{id}` and their events |
-| `json-schema/chat/` | platform `conversation.v1`/`message.v1`, the demo `demo-*` schemas and the demo event payloads (JSON Schema 2020-12, referenced by OpenAPI and AsyncAPI) |
+| `json-schema/chat/` | platform `conversation.v1`/`message.v1` and the event payloads (JSON Schema 2020-12, referenced by OpenAPI and AsyncAPI) |
 | `redocly.yaml` | lint rules |
 
 - Validate: `pnpm contracts:validate` = Redocly lint of OpenAPI + AsyncAPI, then `tools/validate-json-schemas.mjs`

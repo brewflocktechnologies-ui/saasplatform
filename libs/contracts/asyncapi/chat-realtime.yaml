@@ -9,8 +9,7 @@ info:
     optimisation only; it is never the source of truth.
 
     Browsers subscribe with a short-lived subscription JWT issued by the backend for one exact channel; they never see an
-    API key or an HMAC secret. Clients may not publish. The demo `chat:inbox` channel and the demo events are a
-    LOCAL POC — NOT REAL AUTHENTICATION and are removed with the demo module.
+    API key or an HMAC secret. Clients may not publish.
 defaultContentType: application/json
 servers:
   local:

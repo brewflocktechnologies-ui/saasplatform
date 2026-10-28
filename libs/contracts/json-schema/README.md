@@ -7,7 +7,6 @@ Current schemas in `chat/`:
 | `conversation.v1`, `message.v1` | REST responses (widget and agent APIs) |
 | `event-envelope.v1` | the common Centrifugo envelope |
 | `message-created.v1`, `conversation-created.v1`, `conversation-updated.v1`, `typing.v1` | Centrifugo events |
-| `demo-conversation.v1`, `demo-message.v1`, `demo-conversation-created.v1`, `demo-message-created.v1` | the local-dev demo (`/api/v1/demo/*`, removed with the demo module) |
 
 All of them are documented in `../asyncapi/chat-realtime.yaml` and referenced from the OpenAPI contract.
 

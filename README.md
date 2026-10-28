@@ -64,7 +64,7 @@ pnpm stack:down      # stops and removes containers, KEEPS data volumes
 |---|---|
 | Dashboard | http://localhost:3000 · **agent inbox (agentbob): http://localhost:3000/agent** |
 | Widget | http://localhost:5173 · **visitor chat (userone): http://localhost:5173/demo** |
-| Backend API | http://localhost:8080/api/v1/status · /api/v1/bootstrap · /api/v1/demo/* · conversation platform `/api/v1/widget/*` and `/api/v1/agent/*` ([API guide](docs/features/conversation-platform.md)) · /actuator/health |
+| Backend API | http://localhost:8080/api/v1/status · /api/v1/bootstrap · conversation platform `/api/v1/widget/*` and `/api/v1/agent/*` ([API guide](docs/features/conversation-platform.md)) · /actuator/health |
 | Allocation service | http://localhost:8081/api/v1/health · swagger http://localhost:8081/swagger-ui.html (local POC) |
 | Centrifugo | WebSocket `ws://localhost:8000/connection/websocket`, health http://localhost:8000/health |
 | Grafana | http://localhost:3001 (admin password in your local `.env`) |

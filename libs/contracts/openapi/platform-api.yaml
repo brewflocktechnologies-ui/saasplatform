@@ -11,9 +11,8 @@ info:
     JWTs bound to one tenant. **`/api/v1/agent/local-login` is a LOCAL POC â€” NOT REAL AUTHENTICATION**: it issues an
     agent session without a password and exists only when `app.local-dev.enabled=true`.
 
-    **`/api/v1/demo/*` is a LOCAL POC â€” NOT REAL AUTHENTICATION.** The caller names itself with `actorId`,
-    restricted to `userone` (visitor) and `agentbob` (agent); roles are derived on the server. It stays until the demo
-    module is removed. Real-time events are described in `libs/contracts/asyncapi/chat-realtime.yaml`.
+    Real-time events are described in `libs/contracts/asyncapi/chat-realtime.yaml`.
+
   license:
     name: Proprietary
     identifier: LicenseRef-Proprietary
@@ -28,10 +27,6 @@ tags:
     description: Visitor session and conversation API (contact bearer session)
   - name: agent
     description: Dashboard API (agent bearer session)
-  - name: demo-chat
-    description: Chat MVP with hardcoded demo identities (local POC only)
-  - name: demo-realtime
-    description: Short-lived Centrifugo tokens for the demo identities (local POC only)
 paths:
   /api/v1/widget/sessions:
     post:
@@ -605,146 +600,6 @@ paths:
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
-  /api/v1/demo/conversations:
-    post:
-      operationId: ensureDemoConversation
-      summary: Get or create the single open demo conversation of userone (assigned to agentbob)
-      tags: [demo-chat]
-      responses:
-        '200':
-          description: The existing open conversation was reused.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Conversation' }
-        '201':
-          description: The conversation was created by this request.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Conversation' }
-        default:
-          $ref: '#/components/responses/Problem'
-    get:
-      operationId: listAgentConversations
-      summary: Agent inbox, most recent activity first
-      tags: [demo-chat]
-      parameters:
-        - $ref: '#/components/parameters/ActorId'
-      responses:
-        '200':
-          description: Conversations assigned to the agent.
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/Conversation' }
-        '400':
-          $ref: '#/components/responses/Problem'
-        '403':
-          $ref: '#/components/responses/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-  /api/v1/demo/conversations/{conversationId}/messages:
-    parameters:
-      - $ref: '#/components/parameters/DemoConversationId'
-    get:
-      operationId: listMessages
-      summary: Persisted messages of a conversation, ascending by creation time
-      tags: [demo-chat]
-      parameters:
-        - $ref: '#/components/parameters/ActorId'
-      responses:
-        '200':
-          description: Message history.
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/ChatMessage' }
-        '400':
-          $ref: '#/components/responses/Problem'
-        '403':
-          $ref: '#/components/responses/Problem'
-        '404':
-          $ref: '#/components/responses/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-    post:
-      operationId: sendMessage
-      summary: Persist a message, then publish message.created via Centrifugo
-      description: |
-        The message is committed before publication. `realtimeDelivery: FAILED` means the message **is saved**
-        but the live event could not be published â€” do not resend; other clients will see it on their next
-        history load. Text is trimmed; empty text or more than 4000 characters is rejected.
-      tags: [demo-chat]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/DemoSendMessageRequest' }
-            examples:
-              visitor:
-                value: { actorId: userone, text: 'Hello, can you help me?' }
-      responses:
-        '201':
-          description: Message persisted.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/SendMessageResponse' }
-        '400':
-          $ref: '#/components/responses/Problem'
-        '403':
-          $ref: '#/components/responses/Problem'
-        '404':
-          $ref: '#/components/responses/Problem'
-        '503':
-          $ref: '#/components/responses/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-  /api/v1/demo/realtime/connection-token:
-    get:
-      operationId: getConnectionToken
-      summary: Short-lived Centrifugo connection JWT (sub = actorId)
-      tags: [demo-realtime]
-      parameters:
-        - $ref: '#/components/parameters/ActorId'
-      responses:
-        '200':
-          description: Signed token.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/RealtimeToken' }
-        '400':
-          $ref: '#/components/responses/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-  /api/v1/demo/realtime/subscription-token:
-    get:
-      operationId: getSubscriptionToken
-      summary: Short-lived Centrifugo subscription JWT bound to actor and exact channel
-      description: |
-        agentbob may subscribe to `chat:inbox` and to `chat:conversation:<id>` of conversations assigned to them;
-        userone only to their own `chat:conversation:<id>`.
-      tags: [demo-realtime]
-      parameters:
-        - $ref: '#/components/parameters/ActorId'
-        - name: channel
-          in: query
-          required: true
-          schema: { type: string, examples: ['chat:inbox'] }
-      responses:
-        '200':
-          description: Signed token.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/RealtimeToken' }
-        '400':
-          $ref: '#/components/responses/Problem'
-        '403':
-          $ref: '#/components/responses/Problem'
-        '404':
-          $ref: '#/components/responses/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
   /api/v1/admin/outbox:
     get:
       operationId: listOutboxEvents
@@ -960,27 +815,11 @@ components:
       name: X-Admin-Token
       description: LOCAL POC — NOT REAL AUTHENTICATION. Local-dev operator API only.
   parameters:
-    ActorId:
-      name: actorId
-      in: query
-      required: true
-      description: Demo actor (LOCAL POC â€” not authentication).
-      schema:
-        type: string
-        enum: [userone, agentbob]
     ConversationId:
       name: conversationId
       in: path
       required: true
       description: Platform conversation id.
-      schema:
-        type: string
-        format: uuid
-    DemoConversationId:
-      name: conversationId
-      in: path
-      required: true
-      description: Demo conversation id.
       schema:
         type: string
         format: uuid
@@ -1323,31 +1162,6 @@ components:
       properties:
         mode: { type: string, enum: [AUTO, CLAIM, REASSIGN] }
         expectedVersion: { type: integer, format: int64, minimum: 0 }
-    Conversation:
-      $ref: '../json-schema/chat/demo-conversation.v1.schema.json'
-    ChatMessage:
-      $ref: '../json-schema/chat/demo-message.v1.schema.json'
-    DemoSendMessageRequest:
-      type: object
-      required: [actorId, text]
-      properties:
-        actorId:
-          type: string
-          enum: [userone, agentbob]
-        text:
-          type: string
-          maxLength: 4000
-          description: Trimmed by the server; must not be blank.
-    SendMessageResponse:
-      type: object
-      additionalProperties: false
-      required: [message, realtimeDelivery]
-      properties:
-        message: { $ref: '#/components/schemas/ChatMessage' }
-        realtimeDelivery:
-          type: string
-          enum: [PUBLISHED, FAILED]
-          description: FAILED = persisted, but the live event was not published (do not resend).
     RealtimeToken:
       type: object
       additionalProperties: false

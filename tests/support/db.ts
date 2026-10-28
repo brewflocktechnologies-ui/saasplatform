@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { Client } from 'pg';
 
 /** Reads the git-ignored repo-root .env (local or CI-generated). Values are never logged. */
-function localEnv(): Record<string, string> {
+export function localEnv(): Record<string, string> {
   const file = join(__dirname, '..', '..', '.env');
   if (!existsSync(file)) return {};
   return Object.fromEntries(
