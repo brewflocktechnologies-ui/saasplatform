@@ -1,0 +1,11 @@
+# Integration-test profile without the local-dev routes: proves they do not exist when app.local-dev.enabled=false.
+app:
+  local-dev:
+    enabled: false
+    admin-token: test-admin-token
+  seed:
+    enabled: false
+  assignment:
+    enabled: false
+  outbox:
+    enabled: false

@@ -4,6 +4,10 @@ Design document (master spec 9, 10.3, 10.4, 11.3). Plan 03 implements the server
 authorization, typing, event schemas), Plan 06 the client side (`libs/chat-client` `sync.ts`, `pending.ts`,
 `typing.ts`). Conventions (Existing, `D<n>`, `R<n>`): [system-overview.md](system-overview.md) section 0. Decision
 record: [ADR-0007](../../specs/decisions/ADR-0007-transactional-outbox-and-centrifugo.md).
+**Implementation status (Plan 03):** OutboxPublisher (leased batches, backoff, parking, metrics),
+RealtimePublisher.broadcast, the four realtime token endpoints with ChannelAuthorizer, TypingService, the event
+schemas in libs/contracts/json-schema/chat/ and the AsyncAPI document are implemented and covered by
+OutboxPublisherIT, OutboxLeaseIT, RealtimeTokenIT, TypingIT, EventEnvelopeContractTest and OutboxAdminIT.
 
 **Delivery is at least once.** A committed event is published eventually (or parked for an operator), and it can reach
 a client more than once. Clients make duplicates harmless with stable ids; nothing in this design depends on a client

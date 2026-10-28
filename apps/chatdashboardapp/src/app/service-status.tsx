@@ -65,6 +65,9 @@ export function ServiceStatus({ apiBaseUrl }: { apiBaseUrl: string }) {
         <li data-testid="status-database">
           <StatusBadge label="Database" status={dep(status, 'database')} />
         </li>
+        <li data-testid="status-allocation">
+          <StatusBadge label="Allocation" status={dep(status, 'allocation')} />
+        </li>
         <li data-testid="status-centrifugo">
           <StatusBadge label="Centrifugo" status={dep(status, 'centrifugo')} />
         </li>

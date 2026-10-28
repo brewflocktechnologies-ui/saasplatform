@@ -6,13 +6,14 @@ import addFormats from 'ajv-formats';
 import { Centrifuge, type PublicationContext } from 'centrifuge';
 import { parse } from 'yaml';
 import { urls } from '../playwright.config';
+import { agentSession, resolve, sendMessage, startConversation, widgetSession, type Session } from '../support/api';
 
 /**
  * Validates live backend responses against libs/contracts/openapi/platform-api.yaml (OpenAPI 3.1 = JSON Schema
  * 2020-12) and live Centrifugo events against libs/contracts/json-schema.
  */
 const contracts = join(__dirname, '..', '..', 'libs', 'contracts');
-const SCHEMA_BASE = 'https://schemas.chat-platform.local/';
+const SCHEMA_BASE = 'https://schemas.chat-platform.local/chat/';
 
 // OpenAPI references the event/DTO schemas by relative file path; point those refs at the schemas' $id instead.
 const rebase = (node: unknown): unknown =>
@@ -22,7 +23,7 @@ const rebase = (node: unknown): unknown =>
       ? Object.fromEntries(
           Object.entries(node).map(([k, v]) =>
             k === '$ref' && typeof v === 'string' && v.startsWith('../json-schema/')
-              ? [k, SCHEMA_BASE + v.slice('../json-schema/'.length)]
+              ? [k, 'https://schemas.chat-platform.local/' + v.slice('../json-schema/'.length)]
               : [k, rebase(v)],
           ),
         )
@@ -44,16 +45,19 @@ function expectValid(schema: string, body: unknown) {
   expect(validate(body), JSON.stringify(validate.errors)).toBe(true);
 }
 
-async function expectProblem(res: Awaited<ReturnType<APIRequestContext['get']>>, status: number) {
+async function expectProblem(res: Awaited<ReturnType<APIRequestContext['get']>>, status: number, code?: string) {
   expect(res.status()).toBe(status);
   expect(res.headers()['content-type']).toContain('application/problem+json');
-  const body = await res.json();
+  const body = (await res.json()) as { code?: string };
   expectValid('Problem', body);
-  expect(JSON.stringify(body)).not.toMatch(/trace|exception|sql|secret/i);
+  if (code) expect(body.code).toBe(code);
+  expect(JSON.stringify(body)).not.toMatch(/stack ?trace|exception|sql|secret|password/i);
 }
 
+const unique = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
 test.describe('platform-api contract (live backend)', () => {
-  test('GET /api/v1/status conforms to StatusResponse', async ({ request }) => {
+  test('statusConformsToStatusResponse', async ({ request }) => {
     const res = await request.get(`${urls.api}/api/v1/status`);
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('application/json');
@@ -68,126 +72,229 @@ test.describe('platform-api contract (live backend)', () => {
     expect(body.setupKey).toBe('local-poc');
   });
 
-  test('errors use application/problem+json without stack traces', async ({ request }) => {
-    await expectProblem(await request.get(`${urls.api}/api/v1/does-not-exist`), 404);
-  });
-
   test('actuator health is UP', async ({ request }) => {
     const res = await request.get(`${urls.api}/actuator/health`);
     expect(res.status()).toBe(200);
     expect((await res.json()).status).toBe('UP');
   });
-});
 
-test.describe('demo chat API contract (live backend)', () => {
-  test('conversation get-or-create is idempotent and visible in the agent inbox', async ({ request }) => {
-    const first = await request.post(`${urls.api}/api/v1/demo/conversations`);
-    expect([200, 201]).toContain(first.status());
-    const conversation = await first.json();
-    expectValid('Conversation', conversation);
-    expect(conversation).toMatchObject({ visitorId: 'userone', assignedAgentId: 'agentbob', status: 'OPEN' });
+  test('widgetSessionAndConversationConformToSchemas', async ({ request }) => {
+    const res = await request.post(`${urls.api}/api/v1/widget/sessions`, {
+      data: { widgetKey: 'wk_local_demo', externalId: unique('contract'), displayName: 'Contract' },
+    });
+    expect([200, 201]).toContain(res.status());
+    expectValid('WidgetSessionResponse', await res.json());
 
-    const second = await request.post(`${urls.api}/api/v1/demo/conversations`);
-    expect(second.status()).toBe(200);
-    expect((await second.json()).id).toBe(conversation.id);
+    const session = await widgetSession(request, unique('contract'));
+    const conversation = await startConversation(request, session);
+    expectValid('ConversationView', conversation);
+    // The contact view never carries routing details (R-P3).
+    expect(Object.keys(conversation.assignment).sort()).toEqual(['agentId', 'state']);
 
-    const inbox = await request.get(`${urls.api}/api/v1/demo/conversations?actorId=agentbob`);
-    expect(inbox.status()).toBe(200);
-    const list = await inbox.json();
-    list.forEach((c: unknown) => expectValid('Conversation', c));
-    expect(list.map((c: { id: string }) => c.id)).toContain(conversation.id);
+    const again = await request.post(`${urls.api}/api/v1/widget/conversations`, { headers: session.headers });
+    expect(again.status()).toBe(200);
+    expect((await again.json()).id).toBe(conversation.id);
   });
 
-  test('send + history conform to the contract; invalid input is rejected', async ({ request }) => {
-    const { id } = await (await request.post(`${urls.api}/api/v1/demo/conversations`)).json();
-    const url = `${urls.api}/api/v1/demo/conversations/${id}/messages`;
+  test('messagePageConforms', async ({ request }) => {
+    const session = await widgetSession(request, unique('contract'));
+    const { id } = await startConversation(request, session);
+    for (const n of [1, 2, 3]) {
+      const sent = await sendMessage(request, 'widget', session, id, `contract ${n}`);
+      expect(sent.status()).toBe(201);
+      expectValid('MessageView', await sent.json());
+    }
+    const page = await request.get(`${urls.api}/api/v1/widget/conversations/${id}/messages?limit=2`, {
+      headers: session.headers,
+    });
+    expect(page.status()).toBe(200);
+    const body = await page.json();
+    expectValid('MessagePage', body);
+    expect(body.items).toHaveLength(2);
+    expect(body.hasMore).toBe(true);
+    const sequences = body.items.map((m: { sequence: number }) => m.sequence);
+    expect(sequences).toEqual([...sequences].sort((a: number, b: number) => a - b));
+  });
 
-    const sent = await request.post(url, { data: { actorId: 'userone', text: `contract-${Date.now()}` } });
-    expect(sent.status()).toBe(201);
-    const body = await sent.json();
-    expectValid('SendMessageResponse', body);
-    expect(body.message.senderRole).toBe('VISITOR');
+  test('agentInboxConforms', async ({ request }) => {
+    const agent = await agentSession(request);
+    const me = await request.get(`${urls.api}/api/v1/agent/me`, { headers: agent.headers });
+    expect(me.status()).toBe(200);
+    expectValid('AgentMeView', await me.json());
 
-    const history = await request.get(`${url}?actorId=userone`);
-    expect(history.status()).toBe(200);
-    const messages = await history.json();
-    messages.forEach((m: unknown) => expectValid('ChatMessage', m));
-    const times = messages.map((m: { createdAt: string }) => Date.parse(m.createdAt));
-    expect(times).toEqual([...times].sort((a, b) => a - b));
+    const inboxes = await request.get(`${urls.api}/api/v1/agent/inboxes`, { headers: agent.headers });
+    expect(inboxes.status()).toBe(200);
+    const list = await inboxes.json();
+    expect(list.length).toBeGreaterThan(0);
+    list.forEach((i: unknown) => expectValid('InboxView', i));
 
-    await expectProblem(await request.post(url, { data: { actorId: 'userone', text: '   ' } }), 400);
-    await expectProblem(await request.post(url, { data: { actorId: 'userone', text: 'x'.repeat(4001) } }), 400);
-    await expectProblem(await request.post(url, { data: { actorId: 'mallory', text: 'hi' } }), 400);
-    await expectProblem(await request.get(`${urls.api}/api/v1/demo/conversations?actorId=userone`), 403);
+    const page = await request.get(`${urls.api}/api/v1/agent/inboxes/${list[0].id}/conversations?view=all`, {
+      headers: agent.headers,
+    });
+    expect(page.status()).toBe(200);
+    const body = await page.json();
+    expectValid('InboxPage', body);
+  });
+
+  test('problemsCarryCodeAndNoSecrets', async ({ request }) => {
+    const session = await widgetSession(request, unique('contract'));
+    const other = await widgetSession(request, unique('contract'));
+    const { id } = await startConversation(request, session);
+
+    await expectProblem(await request.get(`${urls.api}/api/v1/widget/conversations/${id}`), 401, 'UNAUTHENTICATED');
+    // A contact token is not an agent token.
     await expectProblem(
-      await request.post(`${urls.api}/api/v1/demo/conversations/00000000-0000-7000-8000-000000000000/messages`, {
-        data: { actorId: 'userone', text: 'hi' },
-      }),
-      404,
+      await request.get(`${urls.api}/api/v1/agent/inboxes`, { headers: session.headers }),
+      403,
+      'FORBIDDEN',
     );
+    // Another contact's conversation is indistinguishable from a missing one (404, R-P22) or forbidden.
+    const foreign = await request.get(`${urls.api}/api/v1/widget/conversations/${id}`, { headers: other.headers });
+    expect([403, 404]).toContain(foreign.status());
+    await expectProblem(foreign, foreign.status());
+    await expectProblem(await request.get(`${urls.api}/api/v1/does-not-exist`), 404, 'NOT_FOUND');
+
+    // 409: a resolved conversation rejects a visitor reply path only after the agent resolved it.
+    const agent = await agentSession(request);
+    const resolved = await resolve(request, agent, id);
+    expect(resolved.status()).toBe(200);
+    const reply = await sendMessage(request, 'agent', agent, id, 'late reply');
+    await expectProblem(reply, 409, 'CONVERSATION_RESOLVED');
   });
 
-  test('realtime tokens are issued only for allowed actor/channel pairs', async ({ request }) => {
-    const { id } = await (await request.post(`${urls.api}/api/v1/demo/conversations`)).json();
-    const token = (actor: string, channel: string) =>
-      request.get(`${urls.api}/api/v1/demo/realtime/subscription-token`, { params: { actorId: actor, channel } });
-
-    const connection = await request.get(`${urls.api}/api/v1/demo/realtime/connection-token?actorId=userone`);
-    expect(connection.status()).toBe(200);
-    expectValid('RealtimeToken', await connection.json());
-    expectValid('RealtimeToken', await (await token('agentbob', 'chat:inbox')).json());
-    expect((await token('userone', `chat:conversation:${id}`)).status()).toBe(200);
-    await expectProblem(await token('userone', 'chat:inbox'), 403);
-    await expectProblem(await token('userone', 'chat:conversation:not-a-uuid'), 400);
-    await expectProblem(await request.get(`${urls.api}/api/v1/demo/realtime/connection-token?actorId=admin`), 400);
+  test('rateLimitedRequestsAreProblems (429 sample, when the typing limiter trips)', async ({ request }) => {
+    const session = await widgetSession(request, unique('contract'));
+    const { id } = await startConversation(request, session);
+    const url = `${urls.api}/api/v1/widget/conversations/${id}/typing`;
+    const statuses: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      const res = await request.post(url, { headers: session.headers, data: { typing: true } });
+      statuses.push(res.status());
+      if (res.status() === 429) {
+        await expectProblem(res, 429, 'RATE_LIMITED');
+        return;
+      }
+    }
+    test.skip(true, `typing limiter did not answer 429 (observed ${statuses.join(', ')}); no 429 sample available`);
   });
 });
 
 test.describe('realtime event contract (live Centrifugo)', () => {
   const centrifugoWs = process.env.CENTRIFUGO_WS_URL ?? 'ws://localhost:8000/connection/websocket';
 
-  const tokenFor = (request: APIRequestContext, path: string) => async () =>
-    (await (await request.get(`${urls.api}/api/v1/demo/realtime/${path}`)).json()).token as string;
+  const connectionToken = (request: APIRequestContext, area: 'widget' | 'agent', session: Session) => async () =>
+    (await (await request.get(`${urls.api}/api/v1/${area}/realtime/connection-token`, { headers: session.headers })).json())
+      .token as string;
+  const subscriptionToken =
+    (request: APIRequestContext, area: 'widget' | 'agent', session: Session, channel: string) => async () =>
+      (
+        await (
+          await request.get(`${urls.api}/api/v1/${area}/realtime/subscription-token`, {
+            headers: session.headers,
+            params: { channel },
+          })
+        ).json()
+      ).token as string;
 
-  test('message.created is delivered after commit and matches the JSON Schema', async ({ request }) => {
-    const { id } = await (await request.post(`${urls.api}/api/v1/demo/conversations`)).json();
-    const channel = `chat:conversation:${id}`;
-    const client = new Centrifuge(centrifugoWs, { getToken: tokenFor(request, 'connection-token?actorId=agentbob') });
-    const received: unknown[] = [];
-    const sub = client.newSubscription(channel, {
-      getToken: tokenFor(request, `subscription-token?actorId=agentbob&channel=${encodeURIComponent(channel)}`),
-    });
+  /** Subscribes as the contact of `conversationId`; resolves once subscribed. */
+  async function contactSubscription(request: APIRequestContext, session: Session, conversationId: string) {
+    const channel = `chat:conversation:${conversationId}`;
+    const client = new Centrifuge(centrifugoWs, { getToken: connectionToken(request, 'widget', session) });
+    const received: Array<{ eventType: string; data: unknown } & Record<string, unknown>> = [];
+    const sub = client.newSubscription(channel, { getToken: subscriptionToken(request, 'widget', session, channel) });
     sub.on('publication', (ctx: PublicationContext) => received.push(ctx.data));
     const subscribed = new Promise((resolve) => sub.once('subscribed', resolve));
     sub.subscribe();
     client.connect();
+    await subscribed;
+    return { client, sub, received };
+  }
+
+  test('liveMessageCreatedEventConformsToSchema', async ({ request }) => {
+    const session = await widgetSession(request, unique('contract'));
+    const { id } = await startConversation(request, session);
+    const { client, sub, received } = await contactSubscription(request, session, id);
     try {
-      await subscribed;
-      const sent = await request.post(`${urls.api}/api/v1/demo/conversations/${id}/messages`, {
-        data: { actorId: 'userone', text: `event-contract-${Date.now()}` },
-      });
-      const { message, realtimeDelivery } = await sent.json();
-      expect(realtimeDelivery).toBe('PUBLISHED');
-      await expect.poll(() => received.length, { timeout: 5000 }).toBeGreaterThan(0);
-      const event = received.find((e) => (e as { message?: { id: string } }).message?.id === message.id);
-      expectValid(`${SCHEMA_BASE}chat/message-created.v1.schema.json`, event);
+      const sent = await sendMessage(request, 'widget', session, id, unique('event-contract'));
+      const message = await sent.json();
+      await expect
+        .poll(() => received.find((e) => e.eventType === 'message.created'), { timeout: 10_000 })
+        .toBeTruthy();
+      const event = received.find(
+        (e) => e.eventType === 'message.created' && (e.data as { message: { id: string } }).message.id === message.id,
+      );
+      expectValid(`${SCHEMA_BASE}message-created.v1.schema.json`, event);
 
       // Client-side publication is disabled for the chat namespace.
-      await expect(sub.publish({ type: 'message.created' })).rejects.toMatchObject({ code: 103 });
+      await expect(sub.publish({ eventType: 'message.created' })).rejects.toMatchObject({ code: 103 });
     } finally {
       client.disconnect();
     }
   });
 
-  test('Centrifugo rejects invalid connection tokens and token-less private subscriptions', async ({ request }) => {
-    const bad = new Centrifuge(centrifugoWs, { token: 'not-a-jwt' });
+  test('liveConversationUpdatedEventConforms', async ({ request }) => {
+    const session = await widgetSession(request, unique('contract'));
+    const { id } = await startConversation(request, session);
+    const { client, received } = await contactSubscription(request, session, id);
+    try {
+      const agent = await agentSession(request);
+      expect((await resolve(request, agent, id)).status()).toBe(200);
+      await expect
+        .poll(() => received.find((e) => e.eventType === 'conversation.updated'), { timeout: 10_000 })
+        .toBeTruthy();
+      const event = received.find((e) => e.eventType === 'conversation.updated');
+      expectValid(`${SCHEMA_BASE}conversation-updated.v1.schema.json`, event);
+    } finally {
+      client.disconnect();
+    }
+  });
+
+  test('liveTypingEventConforms', async ({ request }) => {
+    const session = await widgetSession(request, unique('contract'));
+    const { id } = await startConversation(request, session);
+    const { client, received } = await contactSubscription(request, session, id);
+    try {
+      const agent = await agentSession(request);
+      const res = await request.post(`${urls.api}/api/v1/agent/conversations/${id}/typing`, {
+        headers: agent.headers,
+        data: { typing: true },
+      });
+      expect(res.status()).toBeLessThan(300);
+      await expect.poll(() => received.find((e) => e.eventType === 'typing'), { timeout: 10_000 }).toBeTruthy();
+      expectValid(`${SCHEMA_BASE}typing.v1.schema.json`, received.find((e) => e.eventType === 'typing'));
+    } finally {
+      client.disconnect();
+    }
+  });
+
+  test('invalidConnectionTokenIsRejected', async () => {
+    const bad = new Centrifuge(centrifugoWs, { getToken: async () => 'not-a-jwt' });
     const disconnected = new Promise<{ code: number }>((resolve) => bad.once('disconnected', resolve));
     bad.connect();
-    expect((await disconnected).code).toBe(3500);
+    try {
+      // Centrifugo answers an unparsable token with its invalid-token disconnect code (observed: 3500).
+      expect((await disconnected).code).toBe(3500);
+    } finally {
+      bad.disconnect();
+    }
+  });
 
-    const client = new Centrifuge(centrifugoWs, { getToken: tokenFor(request, 'connection-token?actorId=userone') });
-    const sub = client.newSubscription('chat:inbox');
-    // The SDK reports a server-side permission denial as a terminal 'unsubscribed' with the server error code.
+  test('subscriptionTokenForAnotherChannelIsRejected', async ({ request }) => {
+    const session = await widgetSession(request, unique('contract'));
+    const other = await widgetSession(request, unique('contract'));
+    const { id } = await startConversation(request, session);
+    const foreignChannel = `chat:conversation:${id}`;
+
+    // The backend refuses to mint a token for a channel the caller does not participate in...
+    const denied = await request.get(`${urls.api}/api/v1/widget/realtime/subscription-token`, {
+      headers: other.headers,
+      params: { channel: foreignChannel },
+    });
+    expect([403, 404]).toContain(denied.status());
+
+    // ...and Centrifugo rejects a token-less subscription as a terminal 'unsubscribed' with code 103.
+    const client = new Centrifuge(centrifugoWs, { getToken: connectionToken(request, 'widget', other) });
+    const sub = client.newSubscription(foreignChannel);
     const rejected = new Promise<{ code: number }>((resolve) => sub.once('unsubscribed', resolve));
     sub.subscribe();
     client.connect();

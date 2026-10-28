@@ -3,12 +3,12 @@
 Lit 3 + Vite app containing the framework-independent `<chat-platform-widget>` custom element.
 
 - `/` — overview + standalone `<cp-status-badge>`.
-- `/demo` — live chat as demo visitor `userone`: history from the API (PostgreSQL), live updates from Centrifugo,
+- `/demo` — live chat as demo visitor `userone` (widget session + tenant-scoped API): history from the API, live updates from Centrifugo, pending/retry sends, typing, agent presence, lifecycle status,
   connection state, send errors. **LOCAL POC — NOT REAL AUTHENTICATION.** See docs/features/local-chat-mvp.md.
 
-Attributes: `api-base-url` (default `http://localhost:8080`), `realtime-url` (default
+Attributes: `widget-key` (default `VITE_PUBLIC_WIDGET_KEY` or `wk_local_demo`), `external-id`, `display-name` (contact identity), `api-base-url` (default `http://localhost:8080`), `realtime-url` (default
 `ws://localhost:8000/connection/websocket`); build-time overrides `VITE_PUBLIC_API_BASE_URL`,
-`VITE_PUBLIC_CENTRIFUGO_WS_URL`. Never put secrets in `VITE_*`.
+`VITE_PUBLIC_CENTRIFUGO_WS_URL`, `VITE_PUBLIC_WIDGET_KEY`. Never put secrets in `VITE_*`.
 
 | Command | |
 |---|---|

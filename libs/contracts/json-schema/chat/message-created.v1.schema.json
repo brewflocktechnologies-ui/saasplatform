@@ -2,24 +2,47 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.chat-platform.local/chat/message-created.v1.schema.json",
   "title": "MessageCreatedEvent",
-  "description": "Published after the message is committed, on chat:conversation:<id> and (as an inbox refresh signal) on chat:inbox. Not a source of history: clients reload from the API.",
+  "description": "Published on chat:conversation:<id> and chat:inbox:<tenant>:<inbox> after the message transaction committed.",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "type",
-    "conversationId",
-    "message"
-  ],
+  "required": ["eventId", "eventType", "schemaVersion", "tenantId", "conversationId", "occurredAt", "data"],
   "properties": {
-    "type": {
-      "const": "message.created"
-    },
-    "conversationId": {
-      "type": "string",
-      "format": "uuid"
-    },
-    "message": {
-      "$ref": "message.v1.schema.json"
+    "eventId": { "type": "string", "format": "uuid" },
+    "eventType": { "const": "message.created" },
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "tenantId": { "type": "string", "minLength": 1, "maxLength": 63 },
+    "conversationId": { "type": "string", "format": "uuid" },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["message"],
+      "properties": { "message": { "$ref": "message.v1.schema.json" } }
     }
-  }
+  },
+  "examples": [
+    {
+      "eventId": "019a1b2c-0000-7000-8000-000000000011",
+      "eventType": "message.created",
+      "schemaVersion": 1,
+      "tenantId": "tenant-local",
+      "conversationId": "019a1b2c-0000-7000-8000-000000000001",
+      "occurredAt": "2026-10-27T12:00:00Z",
+      "data": {
+        "message": {
+          "id": "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6071",
+          "conversationId": "019a1b2c-0000-7000-8000-000000000001",
+          "sequence": 1,
+          "senderType": "CONTACT",
+          "senderId": "019a1b2c-0000-7000-8000-000000000003",
+          "messageType": "TEXT",
+          "body": "Hello!",
+          "clientMessageId": "0f4a2d1c-1b1e-4c8e-9d3a-1f2b3c4d5e6f",
+          "createdAt": "2026-10-27T12:00:00Z",
+          "editedAt": null,
+          "deletedAt": null
+        }
+      }
+    }
+  ]
 }

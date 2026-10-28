@@ -93,6 +93,20 @@ Browser A → http://localhost:5173/demo (visitor `userone`), Browser B → http
 `agentbob`). Works in both modes. Details, API, events and limitations:
 [docs/features/local-chat-mvp.md](../features/local-chat-mvp.md). **LOCAL POC — NOT REAL AUTHENTICATION.**
 
+### Conversation platform API (Plan 02)
+
+The new tenant-scoped API is served but the widget and dashboard still use the demo endpoints until Plan 06:
+`POST /api/v1/widget/sessions`, `POST /api/v1/widget/conversations`, `GET|POST …/messages`, `PUT …/read`,
+`POST /api/v1/agent/local-login`, `GET /api/v1/agent/inboxes/**`, `GET|POST /api/v1/agent/conversations/**` (lifecycle
+commands included; `/assign` answers 501 until Plan 04). Token flow, curl examples, seed identities and problem codes:
+[docs/features/conversation-platform.md](../features/conversation-platform.md).
+
+New `.env` keys (appended automatically by `scripts/dev-setup.ps1`): `APP_SESSION_TOKEN_HMAC_SECRET_KEY`
+(generated, 32+ characters; the backend fails fast without it), `APP_LOCAL_ADMIN_TOKEN` (generated, used by the
+local-dev admin API from Plan 03), `APP_LOCAL_DEV_ENABLED` (enables agent local login and the admin API; the backend
+refuses to start with it `true` in a production environment) and `APP_SEED_WIDGET_KEY` (public inbox key, default
+`wk_local_demo`). **LOCAL POC — NOT REAL AUTHENTICATION.**
+
 ## 5. Credentials policy
 
 - All secrets live only in the git-ignored `.env`, generated per machine. `.env.example` holds placeholders.

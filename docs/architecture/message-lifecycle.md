@@ -2,6 +2,8 @@
 
 Design document (master spec 5.4, 5.5, 8.1, 8.4, 10.1, 10.2). Plan 02 T3 implements it in
 `conversation/internal/MessageService`, `HistoryService`, `ReadCursorService` and the repositories named below.
+**Implementation status:** implemented and covered by `MessageWriteIT`, `MessageConcurrencyIT`, `HistoryIT`,
+`ReadCursorIT` and `ConversationApiIT`; the outbox publisher that delivers the rows to Centrifugo is Plan 03.
 Conventions (Existing, `D<n>`, `R<n>`): [system-overview.md](system-overview.md) section 0. Decision record:
 [ADR-0006](../../specs/decisions/ADR-0006-message-write-and-ordering.md).
 

@@ -33,7 +33,7 @@ export default function Index() {
             <dt>Database</dt>
             <dd>PostgreSQL, schema via dedicated Flyway runner</dd>
             <dt>Real-time</dt>
-            <dd>Centrifugo (no channels/auth yet)</dd>
+            <dd>Centrifugo (token-gated channels)</dd>
             <dt>Telemetry</dt>
             <dd>OTel Collector → Tempo / Loki, Prometheus, Grafana</dd>
           </dl>

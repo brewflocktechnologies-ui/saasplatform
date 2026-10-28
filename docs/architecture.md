@@ -81,9 +81,8 @@ It replaces the chat MVP below; Plans 02 to 07 implement it.
 
 ## Chat MVP and real-time
 
-> **Superseded by Plan 06** of the conversation platform (section above): Plan 06 T4 removes the `chat` module and
-> `/api/v1/demo/*`; the V2 tables stay until a later migration drops them. This section describes the code as it is
-> until then.
+> **Superseded by Plan 06** of the conversation platform (section above): the `chat` module and `/api/v1/demo/*` were
+> removed; the V2 tables stay until a later migration drops them. This section is kept as history of the MVP.
 
 Implemented by [specs/mvpsetup.spec.md](../specs/mvpsetup.spec.md); guide: [features/local-chat-mvp.md](features/local-chat-mvp.md).
 

@@ -1,5 +1,7 @@
 # Local chat MVP (specs/mvpsetup.spec.md)
 
+> **Superseded by `docs/features/conversation-platform.md` (Plan 06).** The `chat` module and `/api/v1/demo/*` described below were removed; the V2 tables remain until a later migration drops them.
+
 > **LOCAL POC — NOT REAL AUTHENTICATION.** Two hardcoded identities: visitor `userone` (Lit widget) and agent
 > `agentbob` (Next.js dashboard). The caller names itself with `actorId`. This spec is **not** approval to deploy
 > this identity model to UAT or production.

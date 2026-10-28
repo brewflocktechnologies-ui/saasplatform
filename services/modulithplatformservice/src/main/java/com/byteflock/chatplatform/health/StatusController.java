@@ -34,6 +34,7 @@ class StatusController {
 		Map<String, DependencyStatus> dependencies = new LinkedHashMap<>();
 		dependencies.put("database", this.checks.database());
 		dependencies.put("centrifugo", this.checks.centrifugo());
+		dependencies.put("allocation", this.checks.allocation());
 		String overall = dependencies.values().stream().allMatch(DependencyStatus::isUp) ? "UP" : "DEGRADED";
 		return new StatusResponse(this.application, this.version, this.environment, overall, Instant.now(),
 				dependencies);

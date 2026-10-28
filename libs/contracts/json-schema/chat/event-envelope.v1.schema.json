@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chat-platform.local/chat/event-envelope.v1.schema.json",
+  "title": "EventEnvelope",
+  "description": "Common envelope of every Centrifugo event. Delivery is at least once: consumers dedupe by eventId and reconcile from the API.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["eventId", "eventType", "schemaVersion", "tenantId", "conversationId", "occurredAt", "data"],
+  "properties": {
+    "eventId": { "type": "string", "format": "uuid" },
+    "eventType": {
+      "type": "string",
+      "enum": ["message.created", "conversation.created", "conversation.updated", "typing"]
+    },
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "tenantId": { "type": "string", "minLength": 1, "maxLength": 63 },
+    "conversationId": { "type": ["string", "null"], "format": "uuid" },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "data": { "type": "object" }
+  },
+  "examples": [
+    {
+      "eventId": "019a1b2c-0000-7000-8000-000000000010",
+      "eventType": "typing",
+      "schemaVersion": 1,
+      "tenantId": "tenant-local",
+      "conversationId": "019a1b2c-0000-7000-8000-000000000001",
+      "occurredAt": "2026-10-27T12:00:00Z",
+      "data": { "participantType": "CONTACT", "participantId": "019a1b2c-0000-7000-8000-000000000003", "typing": true }
+    }
+  ]
+}

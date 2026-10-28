@@ -17,6 +17,11 @@ services:
       CENTRIFUGO_HTTP_API_KEY: ${CENTRIFUGO_HTTP_API_KEY:?run scripts/dev-setup.ps1}
       CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY: ${CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY:?run scripts/dev-setup.ps1}
       CENTRIFUGO_CLIENT_SUBSCRIPTION_TOKEN_HMAC_SECRET_KEY: ${CENTRIFUGO_CLIENT_SUBSCRIPTION_TOKEN_HMAC_SECRET_KEY:?run scripts/dev-setup.ps1}
+      APP_SESSION_TOKEN_HMAC_SECRET_KEY: ${APP_SESSION_TOKEN_HMAC_SECRET_KEY:?run scripts/dev-setup.ps1}
+      APP_LOCAL_ADMIN_TOKEN: ${APP_LOCAL_ADMIN_TOKEN:?run scripts/dev-setup.ps1}
+      APP_LOCAL_DEV_ENABLED: ${APP_LOCAL_DEV_ENABLED:-true}
+      APP_SEED_WIDGET_KEY: ${APP_SEED_WIDGET_KEY:-wk_local_demo}
+      ALLOCATION_URL: http://allocation-service:8080
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
     ports:
       - '127.0.0.1:${BACKEND_HOST_PORT:-8080}:8080'
@@ -29,6 +34,8 @@ services:
         condition: service_healthy
       otel-collector:
         condition: service_started
+      allocation-service:
+        condition: service_healthy
     restart: unless-stopped
 
   chatdashboardapp:

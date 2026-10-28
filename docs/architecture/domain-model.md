@@ -2,7 +2,10 @@
 
 Design document (master spec 5 and 8.2). Plan 02 T1 creates the tables of section 3 in
 `database/flywayMigration/sql/V3__conversation_platform.sql`; Plans 02, 04 and 05 implement the state machines of
-sections 5 and 6. Conventions (Existing, `D<n>`, `R<n>`): [system-overview.md](system-overview.md) section 0.
+sections 5 and 6. **Implementation status:** V3 is applied and immutable, sections 5 and 6 are implemented by
+`conversation/internal/ConversationLifecycle`, `ConversationService` and `MessageService` (Plan 02); the worker paths of
+section 6 (`AssignmentWorker`, `/assign`) and the retention purge (Plans 04 and 05) are not implemented yet.
+Conventions (Existing, `D<n>`, `R<n>`): [system-overview.md](system-overview.md) section 0.
 
 **Existing:** V1 (`platform_bootstrap`) and V2 (`chat_conversations`, `chat_messages`, no `tenant_id`) are applied and
 immutable (`database/flywayMigration/sql/`; [workspace-inventory.md](../research/workspace-inventory.md) section 5).

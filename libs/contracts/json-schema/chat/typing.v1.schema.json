@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.chat-platform.local/chat/typing.v1.schema.json",
+  "title": "TypingEvent",
+  "description": "Ephemeral typing indicator on chat:conversation:<id>. Not persisted, not in the outbox; consumers clear the indicator after a short timeout when the stop signal is lost.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["eventId", "eventType", "schemaVersion", "tenantId", "conversationId", "occurredAt", "data"],
+  "properties": {
+    "eventId": { "type": "string", "format": "uuid" },
+    "eventType": { "const": "typing" },
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "tenantId": { "type": "string", "minLength": 1, "maxLength": 63 },
+    "conversationId": { "type": "string", "format": "uuid" },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["participantType", "participantId", "typing"],
+      "properties": {
+        "participantType": { "type": "string", "enum": ["CONTACT", "AGENT"] },
+        "participantId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "typing": { "type": "boolean" }
+      }
+    }
+  },
+  "examples": [
+    {
+      "eventId": "019a1b2c-0000-7000-8000-000000000014",
+      "eventType": "typing",
+      "schemaVersion": 1,
+      "tenantId": "tenant-local",
+      "conversationId": "019a1b2c-0000-7000-8000-000000000001",
+      "occurredAt": "2026-10-27T12:02:00Z",
+      "data": { "participantType": "AGENT", "participantId": "agentbob", "typing": true }
+    }
+  ]
+}
