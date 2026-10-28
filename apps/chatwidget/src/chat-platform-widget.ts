@@ -3,74 +3,108 @@ import { live } from 'lit/directives/live.js';
 import {
   ApiError,
   CONNECTION_LABEL,
+  MAX_MESSAGE_LENGTH,
   conversationChannel,
-  createChatApi,
+  createConversationSync,
+  createPendingQueue,
   createRealtime,
-  mergeMessages,
-  type ChatMessage,
+  createTypingEmitter,
+  createTypingReceiver,
+  createWidgetApi,
+  createWidgetSessionStore,
+  ensureSession,
+  type ChatEvent,
   type ConnectionState,
-  type Conversation,
+  type ConversationSync,
+  type ConversationView,
+  type MessageView,
+  type PendingMessage,
+  type PendingQueue,
   type Realtime,
+  type WidgetApi,
 } from '@chat-platform/chat-client';
 
-/** LOCAL POC — NOT REAL AUTHENTICATION: the widget always acts as the hardcoded demo visitor. */
-const VISITOR = 'userone' as const;
-
 const env = import.meta.env as Record<string, string | undefined>;
+
+const PRESENCE_REFRESH_MS = 30_000;
+const READ_DEBOUNCE_MS = 1_000;
 
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 /**
- * `<chat-platform-widget>` — visitor chat panel. History comes from the REST API (PostgreSQL); live updates arrive
- * from Centrifugo and are merged by message id. The widget never publishes to Centrifugo.
+ * `<chat-platform-widget>` — visitor chat panel. History and catch-up come from the REST API (PostgreSQL); live updates
+ * arrive from Centrifugo through the shared conversation sync. The widget never publishes to Centrifugo and renders
+ * message bodies as text only.
  *
  * Attributes: `api-base-url` (default http://localhost:8080), `realtime-url` (default
- * ws://localhost:8000/connection/websocket). Both must be browser-reachable URLs.
+ * ws://localhost:8000/connection/websocket), `widget-key` (default VITE_PUBLIC_WIDGET_KEY or wk_local_demo),
+ * `external-id` and `display-name` (optional contact identity). URLs must be browser-reachable.
  */
 export class ChatPlatformWidget extends LitElement {
   static override properties = {
     apiBaseUrl: { type: String, attribute: 'api-base-url' },
     realtimeUrl: { type: String, attribute: 'realtime-url' },
+    widgetKey: { type: String, attribute: 'widget-key' },
+    externalId: { type: String, attribute: 'external-id' },
+    displayName: { type: String, attribute: 'display-name' },
     conversation: { state: true },
     messages: { state: true },
+    pending: { state: true },
     connection: { state: true },
     draft: { state: true },
-    sending: { state: true },
     error: { state: true },
     notice: { state: true },
     subscribed: { state: true },
+    agentTyping: { state: true },
+    closed: { state: true },
   };
 
   declare apiBaseUrl: string;
   declare realtimeUrl: string;
-  declare conversation: Conversation | null;
-  declare messages: ChatMessage[];
+  declare widgetKey: string;
+  declare externalId: string | undefined;
+  declare displayName: string | undefined;
+  declare conversation: ConversationView | null;
+  declare messages: MessageView[];
+  declare pending: PendingMessage[];
   declare connection: ConnectionState;
   declare draft: string;
-  declare sending: boolean;
   declare error: string;
   declare notice: string;
   declare subscribed: boolean;
+  declare agentTyping: boolean;
+  /** True once the conversation is archived (409 CONVERSATION_ARCHIVED or `archivedAt` set). */
+  declare closed: boolean;
 
+  private token: string | null = null;
+  private api: WidgetApi | null = null;
   private realtime: Realtime | null = null;
+  private sync: ConversationSync | null = null;
+  private queue: PendingQueue | null = null;
+  private typingEmitter: ReturnType<typeof createTypingEmitter> | null = null;
+  private typingReceiver: ReturnType<typeof createTypingReceiver> | null = null;
   private cleanups: Array<() => void> = [];
+  private presenceTimer: ReturnType<typeof setInterval> | undefined;
+  private readTimer: ReturnType<typeof setTimeout> | undefined;
+  private lastRead = 0;
 
   constructor() {
     super();
     this.apiBaseUrl = env['VITE_PUBLIC_API_BASE_URL'] ?? 'http://localhost:8080';
     this.realtimeUrl = env['VITE_PUBLIC_CENTRIFUGO_WS_URL'] ?? 'ws://localhost:8000/connection/websocket';
+    this.widgetKey = env['VITE_PUBLIC_WIDGET_KEY'] ?? 'wk_local_demo';
+    this.externalId = undefined;
+    this.displayName = undefined;
     this.conversation = null;
     this.messages = [];
+    this.pending = [];
     this.connection = 'connecting';
     this.draft = '';
-    this.sending = false;
     this.error = '';
     this.notice = '';
     this.subscribed = false;
-  }
-
-  private get api() {
-    return createChatApi(this.apiBaseUrl);
+    this.agentTyping = false;
+    this.closed = false;
   }
 
   override connectedCallback() {
@@ -80,86 +114,200 @@ export class ChatPlatformWidget extends LitElement {
 
   override disconnectedCallback() {
     super.disconnectedCallback();
-    this.cleanups.forEach((c) => c());
-    this.cleanups = [];
+    this.unbind();
+    clearInterval(this.presenceTimer);
     this.realtime?.disconnect();
     this.realtime = null;
   }
 
   private async start() {
+    const api = createWidgetApi(this.apiBaseUrl, () => this.token);
+    this.api = api;
+    let view: ConversationView;
     try {
-      this.conversation = await this.api.ensureConversation();
-      await this.reloadHistory();
+      const session = await ensureSession(api, createWidgetSessionStore(this.widgetKey), this.widgetKey, {
+        externalId: this.externalId,
+        displayName: this.displayName,
+      });
+      this.token = session.sessionToken;
+      view = await api.startOrResume();
     } catch (e) {
       this.error = `Could not load the conversation: ${(e as Error).message}`;
       this.connection = 'offline';
       return;
     }
-    const conversationId = this.conversation.id;
     this.realtime = createRealtime({
       url: this.realtimeUrl,
-      api: this.api,
-      actorId: VISITOR,
+      getConnectionToken: async () => (await api.connectionToken()).token,
+      getSubscriptionToken: async (channel) => (await api.subscriptionToken(channel)).token,
       onState: (s) => {
         this.connection = s;
         if (s !== 'live') this.subscribed = false;
       },
     });
+    this.bind(view);
+    this.realtime.connect();
+    this.presenceTimer = setInterval(() => void this.refreshConversation(), PRESENCE_REFRESH_MS);
+  }
+
+  /** (Re)wires sync, pending queue, typing and the channel subscription to one conversation. */
+  private bind(view: ConversationView) {
+    this.unbind();
+    const api = this.api as WidgetApi;
+    const id = view.id;
+    this.conversation = view;
+    this.messages = [];
+    this.pending = [];
+    this.closed = view.archivedAt !== null;
+    this.lastRead = 0;
+    this.error = '';
+    this.notice = '';
+
+    const sync = createConversationSync({
+      conversationId: id,
+      fetchLatest: () => api.listMessages(id, { limit: 50 }),
+      fetchAfter: (after) => api.listMessages(id, { after, limit: 200 }),
+      fetchConversation: () => api.getConversation(id),
+      onMessages: (messages) => {
+        this.messages = messages;
+        this.scheduleRead();
+      },
+      onConversationUpdated: (updated) => {
+        this.conversation = updated;
+        this.closed = updated.archivedAt !== null;
+      },
+    });
+    this.sync = sync;
+
+    const queue = createPendingQueue({
+      send: async (clientMessageId, body) => {
+        try {
+          const message = await api.sendMessage(id, { clientMessageId, body });
+          // Same path as a live event: deduped by sequence if the event already arrived first.
+          void sync.handleEvent(this.envelope(message));
+          return message;
+        } catch (err) {
+          if (err instanceof ApiError && err.code === 'CONVERSATION_ARCHIVED') this.closed = true;
+          throw err;
+        }
+      },
+    });
+    this.queue = queue;
+    this.cleanups.push(queue.subscribe((items) => (this.pending = items)));
+
+    this.typingEmitter = createTypingEmitter({ send: (typing) => api.typing(id, typing) });
+    this.typingReceiver = createTypingReceiver({ onChange: (typing) => (this.agentTyping = typing) });
+
     this.cleanups.push(
-      this.realtime.subscribe(conversationChannel(conversationId), {
-        onEvent: (event) => {
-          if (event.type === 'message.created' && event.conversationId === conversationId) {
-            this.messages = mergeMessages(this.messages, [event.message]);
-          }
-        },
-        // After (re)subscribing, reload from the API so nothing published while offline is missed.
-        onSubscribed: () => {
+      (this.realtime as Realtime).subscribe(conversationChannel(id), {
+        onEvent: (event) => this.onEvent(id, event),
+        // Recovery is only an optimisation: every (re)subscribe reconciles from the API.
+        onSubscribed: (ctx) => {
           this.subscribed = true;
-          void this.reloadHistory().catch(() => undefined);
+          void sync.handleSubscribed(ctx).catch(() => undefined);
         },
         onError: (message) => (this.error = `Live updates unavailable: ${message}`),
       }),
     );
-    this.realtime.connect();
+  }
+
+  private unbind() {
+    this.cleanups.forEach((c) => c());
+    this.cleanups = [];
+    this.typingEmitter?.stop();
+    this.typingReceiver?.reset();
+    clearTimeout(this.readTimer);
+    this.sync = null;
+    this.queue = null;
+  }
+
+  private envelope(message: MessageView): ChatEvent {
+    return {
+      eventId: `sent:${message.id}`,
+      eventType: 'message.created',
+      schemaVersion: 1,
+      tenantId: this.conversation?.tenantId ?? '',
+      conversationId: message.conversationId,
+      occurredAt: message.createdAt,
+      data: { message },
+    };
+  }
+
+  private onEvent(conversationId: string, event: ChatEvent) {
+    if (event.conversationId !== conversationId) return;
+    if (event.eventType === 'typing') {
+      if (event.data.participantType === 'AGENT') this.typingReceiver?.handle(event);
+      return;
+    }
+    if (event.eventType === 'message.created') {
+      const { clientMessageId } = event.data.message;
+      if (clientMessageId) this.queue?.markSent(clientMessageId, event.data.message);
+    }
+    void this.sync?.handleEvent(event);
+    if (event.eventType === 'conversation.updated') void this.refreshConversation();
+  }
+
+  /** Per-caller fields (`agentOnline`) are only on the GET, so presence is refreshed from the API. */
+  private async refreshConversation() {
+    if (!this.api || !this.conversation) return;
+    try {
+      const view = await this.api.getConversation(this.conversation.id);
+      this.conversation = view;
+      this.closed = view.archivedAt !== null;
+    } catch {
+      // keep the last known state; the next tick retries
+    }
+  }
+
+  private scheduleRead() {
+    const sync = this.sync;
+    const conversation = this.conversation;
+    if (!sync || !conversation || document.visibilityState !== 'visible') return;
+    if (sync.lastSequence() <= this.lastRead) return;
+    clearTimeout(this.readTimer);
+    this.readTimer = setTimeout(() => {
+      const sequence = sync.lastSequence();
+      if (sequence <= this.lastRead) return;
+      const previous = this.lastRead;
+      this.lastRead = sequence;
+      this.api?.markRead(conversation.id, sequence).catch(() => (this.lastRead = previous));
+    }, READ_DEBOUNCE_MS);
   }
 
   protected override updated(changed: Map<string, unknown>) {
     // Keep the newest message in view.
-    if (changed.has('messages')) {
+    if (changed.has('messages') || changed.has('pending')) {
       const log = this.renderRoot.querySelector('ol');
       if (log) log.scrollTop = log.scrollHeight;
     }
   }
 
-  private async reloadHistory() {
-    if (!this.conversation) return;
-    const history = await this.api.listMessages(this.conversation.id, VISITOR);
-    this.messages = mergeMessages(this.messages, history);
-  }
-
-  private async send(e: SubmitEvent) {
+  private send(e: SubmitEvent) {
     e.preventDefault();
     const text = this.draft.trim();
     if (!text) {
       this.notice = 'Type a message first.';
       return;
     }
-    if (!this.conversation || this.sending) return;
-    this.sending = true;
+    if (!this.queue || this.closed) return;
     this.error = '';
     this.notice = '';
+    this.typingEmitter?.onSent();
+    this.queue.enqueue(text);
+    this.draft = '';
+  }
+
+  private onInput(e: InputEvent) {
+    this.draft = (e.target as HTMLInputElement).value;
+    this.typingEmitter?.onInput();
+  }
+
+  private async newConversation() {
+    if (!this.api) return;
     try {
-      const result = await this.api.sendMessage(this.conversation.id, VISITOR, text);
-      this.messages = mergeMessages(this.messages, [result.message]);
-      this.draft = '';
-      if (result.realtimeDelivery === 'FAILED') {
-        this.notice = 'Message saved, but live delivery failed. The agent will see it after reloading.';
-      }
+      this.bind(await this.api.startOrResume());
     } catch (err) {
-      const detail = err instanceof ApiError ? err.message : 'unexpected error';
-      this.error = `Message not sent: ${detail}`;
-    } finally {
-      this.sending = false;
+      this.error = `Could not start a new conversation: ${(err as Error).message}`;
     }
   }
 
@@ -194,14 +342,23 @@ export class ChatPlatformWidget extends LitElement {
     .who {
       font-size: var(--cp-text-sm);
     }
-    .conn {
+    .badges {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: var(--cp-spacing-xs, 2px);
+    }
+    .conn,
+    .status,
+    .presence {
       font-size: var(--cp-text-sm);
       padding: 0 var(--cp-spacing-sm);
       border-radius: var(--cp-radius-badge);
       background: var(--cp-color-surface);
       color: var(--cp-color-text);
     }
-    .conn[data-state='live'] {
+    .conn[data-state='live'],
+    .presence[data-online='true'] {
       color: var(--cp-color-success);
     }
     .conn[data-state='offline'] {
@@ -230,17 +387,31 @@ export class ChatPlatformWidget extends LitElement {
       font-size: var(--cp-font-size-100);
       opacity: 0.85;
     }
-    .AGENT {
+    .AGENT,
+    .BOT,
+    .SYSTEM {
       align-self: flex-start;
       background: var(--cp-color-background);
     }
-    .VISITOR {
+    .CONTACT {
       align-self: flex-end;
       background: var(--cp-color-primary);
       color: var(--cp-color-on-primary);
     }
-    .empty {
+    li[data-state='pending'] {
+      opacity: 0.6;
+    }
+    li[data-state='failed'] {
+      outline: 1px solid var(--cp-color-danger);
+    }
+    .empty,
+    .typing {
       color: var(--cp-color-text-muted);
+    }
+    .typing {
+      margin: 0;
+      padding: 0 var(--cp-spacing-md);
+      font-size: var(--cp-text-sm);
     }
     form {
       display: flex;
@@ -265,6 +436,12 @@ export class ChatPlatformWidget extends LitElement {
       background: var(--cp-color-primary);
       color: var(--cp-color-on-primary);
       cursor: pointer;
+    }
+    li button {
+      margin-top: var(--cp-spacing-sm);
+      padding: 0 var(--cp-spacing-sm);
+      background: var(--cp-color-surface);
+      color: var(--cp-color-danger);
     }
     button:disabled {
       opacity: 0.6;
@@ -296,17 +473,49 @@ export class ChatPlatformWidget extends LitElement {
     }
   `;
 
+  private renderMessage(m: MessageView) {
+    return html`<li class=${m.senderType} data-testid="message" data-message-id=${m.id} data-sequence=${m.sequence} data-state="sent">
+      <span class="meta">${m.senderType === 'CONTACT' ? 'You' : m.senderId} · ${time(m.createdAt)}</span>
+      <span data-testid="message-body">${m.body}</span>
+    </li>`;
+  }
+
+  private renderPending(p: PendingMessage) {
+    return html`<li class="CONTACT" data-testid="message" data-client-message-id=${p.clientMessageId} data-state=${p.state}>
+      <span class="meta">You</span>
+      <span data-testid="message-body">${p.body}</span>
+      ${p.state === 'failed'
+        ? html`<span class="meta" data-testid="message-error">Not sent: ${p.error}</span>
+            <button type="button" data-testid="retry" @click=${() => this.queue?.retry(p.clientMessageId)}>Retry</button>`
+        : ''}
+    </li>`;
+  }
+
   override render() {
+    const confirmed = new Set(this.messages.map((m) => m.clientMessageId).filter(Boolean));
+    const unconfirmed = this.pending.filter((p) => !confirmed.has(p.clientMessageId));
+    const online = this.conversation?.agentOnline;
+    const presence = online === true ? 'Online' : online === false ? 'Offline' : 'Unknown';
     return html`
       <section class="panel" aria-labelledby="title">
         <header>
           <div>
             <h2 id="title">Chat with us</h2>
-            <span class="who" data-testid="visitor-id">Demo visitor: ${VISITOR}</span>
+            <span class="who" data-testid="visitor-id">${this.externalId ? `Demo visitor: ${this.externalId}` : 'Visitor'}</span>
           </div>
-          <span class="conn" data-testid="connection-state" data-state=${this.connection} role="status">
-            ${CONNECTION_LABEL[this.connection]}
-          </span>
+          <div class="badges">
+            <span class="conn" data-testid="connection-state" data-state=${this.connection} role="status">
+              ${CONNECTION_LABEL[this.connection]}
+            </span>
+            ${this.conversation
+              ? html`<span class="status" data-testid="conversation-status">
+                    ${this.closed ? 'Closed' : this.conversation.status}
+                  </span>
+                  <span class="presence" data-testid="agent-presence" data-online=${String(online === true)}>
+                    Agent: ${presence}
+                  </span>`
+              : ''}
+          </div>
         </header>
         <ol
           role="log"
@@ -316,31 +525,29 @@ export class ChatPlatformWidget extends LitElement {
           data-conversation-id=${this.conversation?.id ?? ''}
           data-subscribed=${String(this.subscribed)}
         >
-          ${this.messages.length === 0
+          ${this.messages.length === 0 && unconfirmed.length === 0
             ? html`<li class="empty" data-testid="greeting">Hi! Send a message and an agent will reply.</li>`
-            : this.messages.map(
-                (m) => html`<li class=${m.senderRole} data-testid="message" data-message-id=${m.id}>
-                  <span class="meta">${m.senderRole === 'VISITOR' ? 'You' : m.senderId} · ${time(m.createdAt)}</span>
-                  <span data-testid="message-body">${m.body}</span>
-                </li>`,
-              )}
+            : html`${this.messages.map((m) => this.renderMessage(m))}${unconfirmed.map((p) => this.renderPending(p))}`}
         </ol>
+        ${this.agentTyping ? html`<p class="typing" data-testid="typing-indicator" role="status">Agent is typing…</p>` : ''}
         ${this.error ? html`<p class="msg error" role="alert" data-testid="widget-error">${this.error}</p>` : ''}
         ${this.notice ? html`<p class="msg warn" role="status" data-testid="widget-notice">${this.notice}</p>` : ''}
-        <form @submit=${this.send}>
-          <label class="sr-only" for="composer">Message</label>
-          <input
-            id="composer"
-            autocomplete="off"
-            maxlength="4000"
-            placeholder="Type a message…"
-            .value=${live(this.draft)}
-            @input=${(e: InputEvent) => (this.draft = (e.target as HTMLInputElement).value)}
-          />
-          <button type="submit" ?disabled=${this.sending || !this.conversation}>
-            ${this.sending ? 'Sending…' : 'Send'}
-          </button>
-        </form>
+        ${this.closed
+          ? html`<form @submit=${(e: Event) => e.preventDefault()}>
+              <button type="button" data-testid="new-conversation" @click=${this.newConversation}>Start a new conversation</button>
+            </form>`
+          : html`<form @submit=${this.send}>
+              <label class="sr-only" for="composer">Message</label>
+              <input
+                id="composer"
+                autocomplete="off"
+                maxlength=${MAX_MESSAGE_LENGTH}
+                placeholder="Type a message…"
+                .value=${live(this.draft)}
+                @input=${this.onInput}
+              />
+              <button type="submit" ?disabled=${!this.conversation}>Send</button>
+            </form>`}
         <p class="msg" style="color: var(--cp-color-text-muted)">LOCAL POC — not real authentication.</p>
       </section>
     `;

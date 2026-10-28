@@ -4,6 +4,7 @@
  *   <link rel="stylesheet" href=".../tokens.css" />
  *   <script type="module" src=".../embed/chat-platform-widget.v1.js"></script>
  *   <chat-platform-widget></chat-platform-widget>
+ * Optional attributes: api-base-url, realtime-url, widget-key (default wk_local_demo), external-id, display-name.
  * Breaking changes to element names/attributes require a new v2 entry; v1 stays until consumers migrate.
  * No CDN pipeline yet (deferred).
  */
