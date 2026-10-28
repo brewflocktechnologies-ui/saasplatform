@@ -1,13 +1,10 @@
-import type { ChatMessage } from './types';
+import type { MessageView } from './types';
 
-/**
- * Merge messages by id (HTTP response + WebSocket event + history reload never duplicate) and keep the server's
- * order: createdAt, then id — the same ordering as the history endpoint.
- */
-export function mergeMessages(existing: readonly ChatMessage[], incoming: readonly ChatMessage[]): ChatMessage[] {
-  const byId = new Map(existing.map((m) => [m.id, m]));
-  for (const m of incoming) byId.set(m.id, m);
-  return [...byId.values()].sort((a, b) =>
-    a.createdAt === b.createdAt ? (a.id < b.id ? -1 : a.id > b.id ? 1 : 0) : Date.parse(a.createdAt) - Date.parse(b.createdAt),
-  );
+/** Merge pages and live messages: dedupe by id, order by sequence, then id (D4, R2). */
+export function mergeMessages(current: MessageView[], incoming: MessageView[]): MessageView[] {
+  const byId = new Map<string, MessageView>();
+  for (const message of [...current, ...incoming]) {
+    byId.set(message.id, message);
+  }
+  return [...byId.values()].sort((a, b) => a.sequence - b.sequence || a.id.localeCompare(b.id));
 }
