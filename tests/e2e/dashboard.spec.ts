@@ -18,6 +18,7 @@ test.describe('dashboard', () => {
     await expect(page.getByText('Backend API: Healthy')).toBeVisible();
     await expect(page.getByText('Database: Healthy')).toBeVisible();
     await expect(page.getByText('Centrifugo: Healthy')).toBeVisible();
+    await expect(page.getByText('Allocation: Healthy')).toBeVisible();
     await expect(page.getByTestId('bootstrap-record')).toContainText('local-poc');
     expect(errors, 'browser console errors').toEqual([]);
   });

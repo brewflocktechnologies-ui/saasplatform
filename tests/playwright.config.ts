@@ -24,7 +24,30 @@ export default defineConfig({
     baseURL: urls.dashboard,
     trace: 'on-first-retry',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'] },
+      testIgnore: ['e2e/conversation-platform.spec.ts', 'e2e/resilience.spec.ts'],
+    },
+    // The lifecycle test purges every resolved conversation of the demo tenant and the resilience suite stops Centrifugo:
+    // neither may overlap the fully parallel suites, so they run serially after them.
+    {
+      name: 'lifecycle',
+      use: { ...devices['Desktop Chrome'] },
+      testMatch: ['e2e/conversation-platform.spec.ts'],
+      dependencies: ['chromium'],
+      fullyParallel: false,
+    },
+    {
+      name: 'resilience',
+      use: { ...devices['Desktop Chrome'] },
+      testMatch: ['e2e/resilience.spec.ts'],
+      dependencies: ['lifecycle'],
+      fullyParallel: false,
+      timeout: 180_000,
+    },
+  ],
   webServer: [
     {
       command: 'pnpm nx run chatdashboardapp:start',
